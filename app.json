@@ -1,0 +1,45 @@
+{
+  "expo": {
+    "name": "Shield Our Elders",
+    "slug": "shield-our-elders",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "description": "A simple scam-safety guide for older adults and the people they trust.",
+    "plugins": [
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow Shield Our Elders to scan QR codes so you can check links before opening them.",
+          "barcodeScannerEnabled": true
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow Shield Our Elders to attach screenshots you choose for a safety check."
+        }
+      ]
+    ],
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "package": "org.projectshield.elders",
+      "permissions": [
+        "CAMERA"
+      ],
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    }
+  }
+}

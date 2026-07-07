@@ -1,0 +1,35 @@
+{
+  "name": "shield-our-elders-app",
+  "version": "1.0.0",
+  "main": "index.ts",
+  "dependencies": {
+    "@react-native-async-storage/async-storage": "2.2.0",
+    "expo": "~57.0.4",
+    "expo-camera": "~57.0.1",
+    "expo-document-picker": "~57.0.0",
+    "expo-image-picker": "~57.0.2",
+    "expo-linking": "~57.0.2",
+    "expo-sms": "~57.0.0",
+    "expo-status-bar": "~57.0.0",
+    "fast-xml-parser": "^5.9.3",
+    "lucide-react-native": "^1.23.0",
+    "react": "19.2.3",
+    "react-native": "0.86.0",
+    "react-native-svg": "15.15.4"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.0",
+    "@types/react": "~19.2.2",
+    "tsx": "^4.23.0",
+    "typescript": "~6.0.3"
+  },
+  "scripts": {
+    "start": "expo start",
+    "android": "expo start --android",
+    "ios": "expo start --ios",
+    "web": "expo start --web",
+    "typecheck": "tsc --noEmit",
+    "test:scams": "tsx scripts/test-scam-analyzer.ts"
+  },
+  "private": true
+}
