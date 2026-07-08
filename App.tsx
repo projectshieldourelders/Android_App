@@ -795,6 +795,20 @@ export default function App() {
               {screenTitles[screen]}
             </Text>
           </View>
+          <TouchableOpacity
+            style={[
+              styles.headerSettingsButton,
+              screen === 'settings' && styles.headerSettingsButtonActive,
+              accessibilitySettings.highContrast && styles.highContrastPill,
+            ]}
+            onPress={() => navigate('settings')}
+            activeOpacity={0.78}
+            accessibilityRole="button"
+            accessibilityLabel="Open accessibility settings"
+          >
+            <Settings size={22} color={screen === 'settings' ? '#FFFFFF' : '#0B6E69'} strokeWidth={2.6} />
+            <Text style={[styles.headerSettingsText, screen === 'settings' && styles.headerSettingsTextActive]}>Settings</Text>
+          </TouchableOpacity>
         </View>
         <View style={[styles.privacyPill, accessibilitySettings.highContrast && styles.highContrastPill]}>
           <ShieldCheck size={15} color="#0B6E69" />
@@ -2089,6 +2103,29 @@ const styles = StyleSheet.create({
   },
   brandText: {
     flex: 1,
+  },
+  headerSettingsButton: {
+    minHeight: 46,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#BFE3DA',
+    backgroundColor: '#EFF8F5',
+  },
+  headerSettingsButtonActive: {
+    backgroundColor: '#0B6E69',
+    borderColor: '#0B6E69',
+  },
+  headerSettingsText: {
+    color: '#0B6E69',
+    fontSize: 15,
+    fontWeight: '900',
+  },
+  headerSettingsTextActive: {
+    color: '#FFFFFF',
   },
   eyebrow: {
     color: '#245B8C',
