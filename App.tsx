@@ -680,7 +680,8 @@ function MainApp() {
     if (available) {
       await SMS.sendSMSAsync([phone], trustedContactMessage);
     } else {
-      Linking.openURL(`sms:${phone}?body=${encodeURIComponent(trustedContactMessage)}`);
+      const separator = Platform.OS === 'ios' ? '&' : '?';
+      Linking.openURL(`sms:${phone}${separator}body=${encodeURIComponent(trustedContactMessage)}`);
     }
   }
 

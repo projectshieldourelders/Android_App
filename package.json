@@ -28,6 +28,9 @@
     "start": "expo start",
     "android": "expo start --android",
     "ios": "expo start --ios",
+    "run:android": "expo run:android",
+    "run:ios": "expo run:ios",
+    "prebuild:ios": "expo prebuild --platform ios",
     "web": "expo start --web",
     "typecheck": "tsc --noEmit",
     "test:scams": "tsx scripts/test-scam-analyzer.ts"
