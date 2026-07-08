@@ -5,9 +5,10 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "automatic",
     "description": "A simple scam-safety guide for older adults and the people they trust.",
     "plugins": [
+      "expo-notifications",
       [
         "expo-camera",
         {

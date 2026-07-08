@@ -92,3 +92,101 @@ export type ScamAlert = {
   summary: string;
   url: string;
 };
+
+
+// ---------------------------------------------------------------------------
+// Product configuration: profile, preferences, accessibility, learning
+// ---------------------------------------------------------------------------
+
+export type ThemePref = 'light' | 'dark' | 'system';
+export type ScalePref = 'default' | 'large' | 'larger';
+export type NotificationCadence = 'off' | 'weekly' | 'biweekly';
+export type AlertSensitivity = 'low' | 'balanced' | 'high';
+export type LearningFrequency = 'off' | 'weekly' | 'biweekly';
+export type Difficulty = 'beginner' | 'intermediate' | 'advanced';
+
+export interface AccessibilityPrefs {
+  textSize: ScalePref;
+  iconSize: ScalePref;
+  highContrast: boolean;
+  reduceMotion: boolean;
+  screenReader: boolean;
+  simplifiedLanguage: boolean;
+  largeTapTargets: boolean;
+}
+
+export interface Preferences {
+  theme: ThemePref;
+  notificationCadence: NotificationCadence;
+  alertSensitivity: AlertSensitivity;
+  learningFrequency: LearningFrequency;
+  difficulty: Difficulty;
+  accessibility: AccessibilityPrefs;
+}
+
+export interface UserProfile {
+  name: string;
+  age: string;
+  createdAt: string;
+}
+
+// Optional, non-judgmental self-assessment. 1 = new to this, 4 = very confident.
+export interface CapabilitySurvey {
+  completed: boolean;
+  techComfort: number;
+  scamRecognition: number;
+  phishingFamiliarity: number;
+  preferredDifficulty: Difficulty;
+}
+
+export interface LearningProgress {
+  currentWeek: number;
+  completedWeeks: string[];
+  quizScores: Record<string, number>;
+  lastActivity: string;
+}
+
+export type DetectionKind = 'call' | 'message' | 'email' | 'link' | 'payment' | 'summary' | 'lesson';
+
+export interface DetectionEvent {
+  id: string;
+  kind: DetectionKind;
+  level: RiskLevel;
+  title: string;
+  detail: string;
+  date: string;
+  uncertain?: boolean;
+  read?: boolean;
+}
+
+export interface CallRiskResult {
+  score: number;
+  level: RiskLevel;
+  headline: string;
+  summary: string;
+  reasons: string[];
+  recommendation: string;
+  uncertain: boolean;
+}
+
+export interface WeeklyModule {
+  id: string;
+  week: number;
+  title: string;
+  minutes: number;
+  difficulty: Difficulty;
+  lesson: string;
+  keyPoints: string[];
+  example: {
+    channel: string;
+    message: string;
+  };
+  explanation: string;
+  quiz: {
+    prompt: string;
+    options: string[];
+    answerIndex: number;
+    whyCorrect: string;
+  };
+  remember: string;
+}

@@ -6,9 +6,11 @@ import * as Linking from 'expo-linking';
 import * as SMS from 'expo-sms';
 import {
   AlertTriangle,
+  Bell,
   BookOpen,
   Camera,
   CheckCircle2,
+  ChevronDown,
   ChevronRight,
   Circle,
   CreditCard,
@@ -19,6 +21,7 @@ import {
   LayoutGrid,
   LifeBuoy,
   Link as LinkIcon,
+  Mail,
   MessageCircle,
   Mic,
   Newspaper,
@@ -26,6 +29,7 @@ import {
   PhoneCall,
   QrCode,
   Search,
+  Settings as SettingsIcon,
   ShieldAlert,
   ShieldCheck,
   Siren,
@@ -35,8 +39,9 @@ import {
   X,
 } from 'lucide-react-native';
 import type { LucideIcon } from 'lucide-react-native';
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   Animated,
   Easing,
@@ -56,8 +61,10 @@ import {
 } from 'react-native';
 import type { DimensionValue, ImageStyle } from 'react-native';
 
-import { emergencySteps, lessons, practiceExamples, recoverySteps, trustedContactMessage } from './src/data/content';
+import { emergencySteps, practiceExamples, recoverySteps, trustedContactMessage } from './src/data/content';
+import { modulesForDifficulty } from './src/data/curriculum';
 import { isAiReviewConfigured, reviewScamWithAi } from './src/services/aiScamReview';
+import { analyzeCallRisk } from './src/services/callRisk';
 import {
   isHfOcrConfigured,
   isHfTranscriptionConfigured,
@@ -66,26 +73,36 @@ import {
 } from './src/services/huggingFaceMedia';
 import { checkSpamWithHuggingFace, isHfSpamCheckConfigured } from './src/services/huggingFaceSpam';
 import { fetchScamAlerts } from './src/services/news';
+import { notifyDetection } from './src/services/notifications';
+import { getCachedSpam, normalizeForCheck, redactForModel, setCachedSpam, shouldEscalateToModel } from './src/services/riskGate';
 import {
   analyzeCallChecklist,
   analyzeMessage,
   analyzePayments,
-  analyzePhoneNumber,
   analyzeUrl,
   analyzeVoiceClone,
-  getLevelColor,
   labelForLevel,
 } from './src/services/scamAnalyzer';
+import { addConfidenceEntry, loadConfidence, loadContacts, loadFamilyPhrase, saveContacts, saveFamilyPhrase } from './src/services/storage';
+import Onboarding from './src/screens/Onboarding';
+import Settings from './src/screens/Settings';
+import { AppProvider, useApp, useTheme } from './src/state/AppProvider';
+import { Theme } from './src/theme/tokens';
 import {
-  addConfidenceEntry,
-  loadConfidence,
-  loadContacts,
-  loadFamilyPhrase,
-  saveContacts,
-  saveFamilyPhrase,
-} from './src/services/storage';
-import { AiScamReview, AnalysisResult, ConfidenceEntry, HfSpamReview, RiskLevel, ScamAlert, TrustedContact } from './src/types/app';
-import { colors, font, radius, shadow, space, weight } from './src/theme';
+  AiScamReview,
+  AlertSensitivity,
+  AnalysisResult,
+  CallRiskResult,
+  ConfidenceEntry,
+  DetectionEvent,
+  DetectionKind,
+  HfSpamReview,
+  RiskLevel,
+  ScamAlert,
+  TrustedContact,
+  WeeklyModule,
+} from './src/types/app';
+import { Btn, Card } from './src/ui/kit';
 
 LogBox.ignoreLogs(['Cannot connect to Expo CLI']);
 
@@ -105,44 +122,20 @@ type Screen =
   | 'practice'
   | 'recovery'
   | 'phone'
-  | 'voicemail';
+  | 'voicemail'
+  | 'activity'
+  | 'settings';
 
 type ToggleState = Record<string, boolean>;
 
-function normalizeCheckInput(value: string) {
-  return value.trim().replace(/\s+/g, ' ').toLowerCase();
-}
-
-const initialCallAnswers: ToggleState = {
-  money: false,
-  secret: false,
-  code: false,
-  remote: false,
-  threat: false,
-  callerId: false,
-};
-
-const initialVoiceAnswers: ToggleState = {
-  family: false,
-  money: false,
-  secret: false,
-  emotional: false,
-};
-
-const initialPayments: ToggleState = {
-  giftCard: false,
-  crypto: false,
-  wire: false,
-  zelle: false,
-  cashApp: false,
-  venmo: false,
-  bankCard: false,
-};
+const initialCallAnswers: ToggleState = { money: false, secret: false, code: false, remote: false, threat: false, callerId: false };
+const initialVoiceAnswers: ToggleState = { family: false, money: false, secret: false, emotional: false };
+const initialPayments: ToggleState = { giftCard: false, crypto: false, wire: false, zelle: false, cashApp: false, venmo: false, bankCard: false };
 
 const screenTitles: Record<Screen, string> = {
   home: 'Start',
   tools: 'Checks',
-  scam: 'Message',
+  scam: 'Message or Email',
   call: 'Phone Call',
   emergency: 'Emergency',
   contacts: 'People to Call',
@@ -150,12 +143,14 @@ const screenTitles: Record<Screen, string> = {
   qr: 'QR Code',
   voice: 'Family Voice',
   payment: 'Before You Pay',
-  news: 'Alerts',
+  news: 'Scam Alerts',
   learn: 'Learn',
   practice: 'Quiz',
   recovery: 'Help After a Scam',
-  phone: 'Phone Number',
+  phone: 'Check a Number',
   voicemail: 'Voicemail',
+  activity: 'Activity',
+  settings: 'Settings',
 };
 
 type ToolAction = { screen: Screen; label: string; detail: string; icon: LucideIcon; tone?: RiskLevel };
@@ -174,7 +169,7 @@ const toolGroups: Array<{ title: string; items: ToolAction[] }> = [
     items: [
       { screen: 'link', label: 'Link', detail: 'Check the address', icon: LinkIcon },
       { screen: 'qr', label: 'QR code', detail: 'Preview the destination', icon: QrCode },
-      { screen: 'phone', label: 'Phone number', detail: 'Check before calling back', icon: Search },
+      { screen: 'phone', label: 'Phone number', detail: 'Check for spoofing', icon: Search },
     ],
   },
   {
@@ -189,7 +184,7 @@ const toolGroups: Array<{ title: string; items: ToolAction[] }> = [
     title: 'Keep learning',
     items: [
       { screen: 'practice', label: 'Quiz', detail: 'Practice with examples', icon: Trophy },
-      { screen: 'news', label: 'Alerts', detail: 'Current scam patterns', icon: Newspaper },
+      { screen: 'news', label: 'Scam alerts', detail: 'Current scam patterns', icon: Newspaper },
     ],
   },
 ];
@@ -198,26 +193,41 @@ const homeQuickChecks: ToolAction[] = [
   { screen: 'scam', label: 'Message', detail: 'Paste the words', icon: MessageCircle },
   { screen: 'call', label: 'Phone call', detail: 'Yes / no check', icon: PhoneCall },
   { screen: 'link', label: 'Link', detail: 'Before you tap', icon: LinkIcon },
-  { screen: 'payment', label: 'Payment', detail: 'Before you pay', icon: CreditCard },
+  { screen: 'phone', label: 'Number', detail: 'Check spoofing', icon: Search },
 ];
 
-const openingSteps: Array<{ title: string; detail: string }> = [
-  { title: 'Stop', detail: 'Take a breath' },
-  { title: 'Check', detail: 'Use a tool' },
-  { title: 'Call', detail: 'Someone you trust' },
-];
+// --- Theme-aware risk color helpers ---------------------------------------
 
-function levelBackground(level: RiskLevel) {
+function levelColor(t: Theme, level: RiskLevel): string {
   switch (level) {
     case 'stop':
-      return colors.dangerTint;
+      return t.colors.danger;
     case 'high':
-      return colors.highTint;
+      return t.colors.high;
     case 'caution':
-      return colors.warnTint;
+      return t.colors.warn;
     default:
-      return colors.brandTint;
+      return t.colors.brand;
   }
+}
+
+function levelBg(t: Theme, level: RiskLevel): string {
+  switch (level) {
+    case 'stop':
+      return t.colors.dangerTint;
+    case 'high':
+      return t.colors.highTint;
+    case 'caution':
+      return t.colors.warnTint;
+    default:
+      return t.colors.brandTint;
+  }
+}
+
+function shouldAlert(level: RiskLevel, sensitivity: AlertSensitivity): boolean {
+  if (sensitivity === 'high') return level === 'caution' || level === 'high' || level === 'stop';
+  if (sensitivity === 'low') return level === 'stop';
+  return level === 'high' || level === 'stop';
 }
 
 function formatDate(date: string) {
@@ -226,11 +236,61 @@ function formatDate(date: string) {
   return parsed.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 
+function formatWhen(date: string) {
+  const parsed = new Date(date);
+  if (Number.isNaN(parsed.getTime())) return '';
+  return parsed.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+}
+
 function normalizePhone(phone: string) {
   return phone.replace(/[^\d+]/g, '');
 }
 
+// ---------------------------------------------------------------------------
+// Root: provider + onboarding gate
+// ---------------------------------------------------------------------------
+
 export default function App() {
+  return (
+    <AppProvider>
+      <Root />
+    </AppProvider>
+  );
+}
+
+function Root() {
+  const { ready, onboardingComplete, theme } = useApp();
+
+  if (!ready) {
+    return (
+      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: theme.colors.bg }}>
+        <ActivityIndicator size="large" color={theme.colors.brand} />
+      </View>
+    );
+  }
+
+  if (!onboardingComplete) {
+    return (
+      <>
+        <StatusBar style={theme.mode === 'dark' ? 'light' : 'dark'} />
+        <Onboarding />
+      </>
+    );
+  }
+
+  return <MainApp />;
+}
+
+
+// ---------------------------------------------------------------------------
+// Main application
+// ---------------------------------------------------------------------------
+
+function MainApp() {
+  const theme = useTheme();
+  const styles = useMemo(() => makeStyles(theme), [theme]);
+  const { profile, prefs, progress, detections, unreadCount, pushDetection, markAllDetectionsRead } = useApp();
+
   const scrollRef = useRef<ScrollView>(null);
   const screenAnim = useRef(new Animated.Value(1)).current;
   const [screen, setScreen] = useState<Screen>('home');
@@ -239,6 +299,7 @@ export default function App() {
   const [familyPhrase, setFamilyPhrase] = useState('');
   const [alerts, setAlerts] = useState<ScamAlert[]>([]);
   const [messageText, setMessageText] = useState('');
+  const [messageChecked, setMessageChecked] = useState(false);
   const [screenshotUri, setScreenshotUri] = useState('');
   const [screenshotBase64, setScreenshotBase64] = useState('');
   const [screenshotMimeType, setScreenshotMimeType] = useState('image/jpeg');
@@ -259,9 +320,6 @@ export default function App() {
   const [hfSpamNotice, setHfSpamNotice] = useState('');
   const [hfSpamLoading, setHfSpamLoading] = useState(false);
   const hfSpamRequestInFlight = useRef(false);
-  const lastHfSpamInput = useRef('');
-  const lastHfSpamReview = useRef<HfSpamReview | null>(null);
-  const currentHfSpamInput = useRef('');
   const [callAnswers, setCallAnswers] = useState<ToggleState>(initialCallAnswers);
   const [voiceAnswers, setVoiceAnswers] = useState<ToggleState>(initialVoiceAnswers);
   const [paymentAnswers, setPaymentAnswers] = useState<ToggleState>(initialPayments);
@@ -269,11 +327,12 @@ export default function App() {
   const [qrValue, setQrValue] = useState('');
   const [scanning, setScanning] = useState(false);
   const [phoneNumber, setPhoneNumber] = useState('');
+  const [claimedIdentity, setClaimedIdentity] = useState('');
+  const [callRisk, setCallRisk] = useState<CallRiskResult | null>(null);
   const [contactDrafts, setContactDrafts] = useState<TrustedContact[]>([
     { id: 'contact-1', label: 'Trusted Contact 1', name: '', phone: '' },
     { id: 'contact-2', label: 'Trusted Contact 2', name: '', phone: '' },
   ]);
-  const [lessonOpen, setLessonOpen] = useState<string | null>(lessons[0]?.id ?? null);
   const [practiceIndex, setPracticeIndex] = useState(0);
   const [selectedPractice, setSelectedPractice] = useState<'safe' | 'suspicious' | 'scam' | null>(null);
   const [practiceStats, setPracticeStats] = useState({ correct: 0, answered: 0 });
@@ -288,7 +347,6 @@ export default function App() {
         loadFamilyPhrase(),
         fetchScamAlerts(),
       ]);
-
       setContacts(storedContacts);
       setContactDrafts([
         storedContacts[0] ?? { id: 'contact-1', label: 'Trusted Contact 1', name: '', phone: '' },
@@ -298,23 +356,21 @@ export default function App() {
       setFamilyPhrase(storedPhrase);
       setAlerts(storedAlerts);
     }
-
     hydrate();
   }, []);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ y: 0, animated: false });
+    if (theme.reducedMotion) {
+      screenAnim.setValue(1);
+      return;
+    }
     screenAnim.setValue(0);
-    Animated.timing(screenAnim, {
-      toValue: 1,
-      duration: 340,
-      easing: Easing.out(Easing.cubic),
-      useNativeDriver: true,
-    }).start();
-  }, [screen, screenAnim]);
+    Animated.timing(screenAnim, { toValue: 1, duration: 320, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start();
+  }, [screen, screenAnim, theme.reducedMotion]);
 
   const scamResult = useMemo(
-    () => analyzeMessage([messageText, voicemailTranscript].filter(Boolean).join('\n'), 'message or transcript'),
+    () => analyzeMessage([messageText, voicemailTranscript].filter(Boolean).join('\n'), 'message or email'),
     [messageText, voicemailTranscript],
   );
   const callResult = useMemo(() => analyzeCallChecklist(callAnswers), [callAnswers]);
@@ -322,7 +378,7 @@ export default function App() {
   const paymentResult = useMemo(() => analyzePayments(paymentAnswers), [paymentAnswers]);
   const linkResult = useMemo(() => analyzeUrl(urlText), [urlText]);
   const qrResult = useMemo(() => analyzeUrl(qrValue), [qrValue]);
-  const phoneResult = useMemo(() => analyzePhoneNumber(phoneNumber), [phoneNumber]);
+
   const hasScamInput = Boolean(messageText.trim() || voicemailTranscript.trim());
   const hasMessageReviewInput = Boolean(messageText.trim() || voicemailTranscript.trim() || screenshotBase64);
   const hfSpamInputText = [messageText, voicemailTranscript].filter(Boolean).join('\n');
@@ -339,14 +395,29 @@ export default function App() {
   const practice = practiceExamples[practiceIndex % practiceExamples.length];
   const practiceNumber = (practiceIndex % practiceExamples.length) + 1;
 
-  useEffect(() => {
-    currentHfSpamInput.current = normalizeCheckInput(hfSpamInputText);
-  }, [hfSpamInputText]);
+  const recordDetection = useCallback(
+    (kind: DetectionKind, level: RiskLevel, title: string, detail: string, uncertain?: boolean) => {
+      if (!shouldAlert(level, prefs.alertSensitivity)) return;
+      const event: DetectionEvent = {
+        id: `d-${Date.now()}`,
+        kind,
+        level,
+        title,
+        detail,
+        date: new Date().toISOString(),
+        uncertain,
+      };
+      pushDetection(event);
+      notifyDetection(event);
+    },
+    [prefs.alertSensitivity, pushDetection],
+  );
 
   function navigate(next: Screen) {
     if (next === screen) return;
     setScreen(next);
     if (next !== 'qr') setScanning(false);
+    if (next === 'activity') markAllDetectionsRead();
   }
 
   async function refreshAlerts() {
@@ -359,14 +430,7 @@ export default function App() {
       Alert.alert('Permission needed', 'Allow photo access to attach a screenshot.');
       return;
     }
-
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
-      allowsEditing: false,
-      quality: 0.85,
-      base64: true,
-    });
-
+    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], allowsEditing: false, quality: 0.85, base64: true });
     if (!result.canceled) {
       setScreenshotUri(result.assets[0].uri);
       setScreenshotBase64(result.assets[0].base64 ?? '');
@@ -380,6 +444,7 @@ export default function App() {
 
   function updateMessageText(value: string) {
     setMessageText(value);
+    setMessageChecked(false);
     setAiReview(null);
     setAiReviewError('');
     setHfSpamReview(null);
@@ -390,6 +455,7 @@ export default function App() {
 
   function updateVoicemailTranscript(value: string) {
     setVoicemailTranscript(value);
+    setMessageChecked(false);
     setAiReview(null);
     setAiReviewError('');
     setHfSpamReview(null);
@@ -415,6 +481,7 @@ export default function App() {
     setHfSpamReview(null);
     setHfSpamError('');
     setHfSpamNotice('');
+    setMessageChecked(false);
   }
 
   async function runScreenshotOcr() {
@@ -422,10 +489,8 @@ export default function App() {
       Alert.alert('Add a screenshot first', 'Choose a screenshot before reading it.');
       return;
     }
-
     setOcrLoading(true);
     setOcrError('');
-
     try {
       const text = await readScreenshotTextWithHuggingFace(screenshotBase64, screenshotMimeType);
       setOcrText(text);
@@ -446,10 +511,8 @@ export default function App() {
       Alert.alert('Upload audio first', 'Choose a voicemail audio file before transcribing.');
       return;
     }
-
     setTranscriptionLoading(true);
     setTranscriptionError('');
-
     try {
       const text = await transcribeAudioWithHuggingFace(voicemailUri, voicemailMimeType || 'audio/mpeg');
       setVoicemailTranscript((current) => (current.trim() ? `${current.trim()}\n${text}` : text));
@@ -463,39 +526,34 @@ export default function App() {
     }
   }
 
+  // Cost-optimized SMS spam check: cache first, redact + cap before sending.
   async function runHfSpamCheck() {
     const input = hfSpamInputText.trim();
-    const normalizedInput = normalizeCheckInput(input);
-
-    if (!normalizedInput) {
+    if (!input) {
       Alert.alert('Paste words first', 'This spam model checks pasted text, not screenshots.');
       return;
     }
-
+    const cached = getCachedSpam(input);
+    if (cached) {
+      setHfSpamReview(cached);
+      setHfSpamError('');
+      setHfSpamNotice('Showing your saved result for this message.');
+      return;
+    }
     if (hfSpamRequestInFlight.current) {
       setHfSpamNotice('This message is already being checked.');
       return;
     }
-
-    if (lastHfSpamInput.current === normalizedInput && lastHfSpamReview.current) {
-      setHfSpamReview(lastHfSpamReview.current);
-      setHfSpamError('');
-      setHfSpamNotice('You already checked this message. Showing the saved result.');
-      return;
-    }
-
     hfSpamRequestInFlight.current = true;
     setHfSpamLoading(true);
     setHfSpamError('');
     setHfSpamNotice('');
-
     try {
-      const review = await checkSpamWithHuggingFace(input);
-      lastHfSpamInput.current = normalizedInput;
-      lastHfSpamReview.current = review;
-
-      if (currentHfSpamInput.current === normalizedInput) {
-        setHfSpamReview(review);
+      const review = await checkSpamWithHuggingFace(redactForModel(input));
+      setCachedSpam(input, review);
+      setHfSpamReview(review);
+      if (review.level === 'high' || review.level === 'stop') {
+        recordDetection('message', review.level, review.headline, review.summary);
       }
     } catch (error) {
       setHfSpamReview(null);
@@ -506,23 +564,38 @@ export default function App() {
     }
   }
 
+  // Local-first message check: run cheap heuristics, log a detection when
+  // risky, and only escalate to the paid model when genuinely uncertain.
+  function runMessageCheck() {
+    if (!hasMessageReviewInput) {
+      Alert.alert('Add something to check', 'Paste a message, or attach a screenshot and read it first.');
+      return;
+    }
+    setMessageChecked(true);
+    const text = hfSpamInputText.trim();
+    if (!text) return;
+    const local = analyzeMessage(text, 'message or email');
+    if (local.level === 'high' || local.level === 'stop') {
+      recordDetection('message', local.level, local.headline, local.summary);
+    }
+    if (isHfSpamCheckConfigured() && shouldEscalateToModel(local, normalizeForCheck(text))) {
+      runHfSpamCheck();
+    }
+  }
+
   async function runAiReview() {
     if (!hasMessageReviewInput) {
       Alert.alert('Add something to check', 'Paste a message or attach a screenshot first.');
       return;
     }
-
     setAiReviewLoading(true);
     setAiReviewError('');
-
     try {
-      const review = await reviewScamWithAi({
-        messageText,
-        transcript: voicemailTranscript,
-        screenshotBase64,
-        localResult: scamResult,
-      });
+      const review = await reviewScamWithAi({ messageText, transcript: voicemailTranscript, screenshotBase64, localResult: scamResult });
       setAiReview(review);
+      if (review.level === 'high' || review.level === 'stop') {
+        recordDetection('message', review.level, review.headline, review.summary);
+      }
     } catch (error) {
       setAiReview(null);
       setAiReviewError(error instanceof Error ? error.message : 'AI review failed.');
@@ -531,13 +604,20 @@ export default function App() {
     }
   }
 
-  async function pickVoicemail() {
-    const result = await DocumentPicker.getDocumentAsync({
-      type: ['audio/*', 'text/*'],
-      copyToCacheDirectory: true,
-      multiple: false,
-    });
+  function runCallRiskCheck() {
+    if (!hasPhoneInput) {
+      Alert.alert('Enter a number', 'Add the incoming phone number to check it.');
+      return;
+    }
+    const result = analyzeCallRisk({ number: phoneNumber, claimedIdentity: claimedIdentity.trim() || undefined });
+    setCallRisk(result);
+    if (result.level === 'high' || result.level === 'stop') {
+      recordDetection('call', result.level, result.headline, result.summary, result.uncertain);
+    }
+  }
 
+  async function pickVoicemail() {
+    const result = await DocumentPicker.getDocumentAsync({ type: ['audio/*', 'text/*'], copyToCacheDirectory: true, multiple: false });
     if (!result.canceled) {
       setVoicemailFile(result.assets[0].name);
       setVoicemailUri(result.assets[0].uri);
@@ -554,13 +634,7 @@ export default function App() {
 
   async function saveContactDraft(index: number) {
     const normalized = contactDrafts.map((contact, contactIndex) =>
-      contactIndex === index
-        ? {
-            ...contact,
-            name: contact.name.trim(),
-            phone: contact.phone.trim(),
-          }
-        : contact,
+      contactIndex === index ? { ...contact, name: contact.name.trim(), phone: contact.phone.trim() } : contact,
     );
     setContactDrafts(normalized);
     await persistContacts(normalized);
@@ -592,14 +666,11 @@ export default function App() {
 
   async function choosePractice(choice: 'safe' | 'suspicious' | 'scam') {
     if (selectedPractice) return;
-
     setSelectedPractice(choice);
     const correct = choice === practice.answer ? practiceStats.correct + 1 : practiceStats.correct;
     const answered = practiceStats.answered + 1;
     setPracticeStats({ correct, answered });
-
-    const nextScore = Math.round((correct / answered) * 100);
-    setConfidence(await addConfidenceEntry(nextScore));
+    setConfidence(await addConfidenceEntry(Math.round((correct / answered) * 100)));
   }
 
   function nextPractice() {
@@ -626,55 +697,64 @@ export default function App() {
   }
 
   function openSearchForPhone() {
-    const query = encodeURIComponent(`${phoneNumber} scam report`);
-    Linking.openURL(`https://www.google.com/search?q=${query}`);
+    Linking.openURL(`https://www.google.com/search?q=${encodeURIComponent(`${phoneNumber} scam report`)}`);
   }
 
+
   function renderHeader() {
-    const isHome = screen === 'home';
-    return (
-      <View style={styles.header}>
-        {isHome ? (
+    if (screen === 'home') {
+      const greeting = profile?.name ? `Hello, ${profile.name}` : 'Shield Our Elders';
+      return (
+        <View style={styles.header}>
           <View style={styles.brandRow}>
             <View style={styles.logoMark}>
-              <ShieldCheck size={26} color={colors.white} strokeWidth={2.4} />
+              <ShieldCheck size={theme.icon(26)} color={theme.colors.onBrand} strokeWidth={2.4} />
             </View>
-            <View style={styles.brandText}>
-              <Text style={styles.brandName}>Shield Our Elders</Text>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.brandName} numberOfLines={1}>
+                {greeting}
+              </Text>
               <Text style={styles.brandTagline}>Your calm second opinion</Text>
             </View>
           </View>
-        ) : (
-          <View style={styles.headerNavRow}>
-            <TouchableOpacity style={styles.backButton} onPress={() => navigate('home')} activeOpacity={0.7}>
-              <ChevronRight size={20} color={colors.brand} style={styles.backIcon} strokeWidth={2.6} />
-              <Text style={styles.backText}>Home</Text>
-            </TouchableOpacity>
-            <Text style={styles.title}>{screenTitles[screen]}</Text>
-          </View>
-        )}
+        </View>
+      );
+    }
+    return (
+      <View style={styles.header}>
+        <View style={styles.headerNavRow}>
+          <TouchableOpacity style={styles.backButton} onPress={() => navigate('home')} activeOpacity={0.7} accessibilityLabel="Back to home">
+            <ChevronRight size={theme.icon(22)} color={theme.colors.brand} style={styles.backIcon} strokeWidth={2.6} />
+            <Text style={styles.backText}>Home</Text>
+          </TouchableOpacity>
+          <Text style={styles.title}>{screenTitles[screen]}</Text>
+        </View>
       </View>
     );
   }
 
   function renderBottomNav() {
-    const items: Array<{ screen: Screen; label: string; icon: LucideIcon }> = [
+    const items: Array<{ screen: Screen; label: string; icon: LucideIcon; badge?: number }> = [
       { screen: 'home', label: 'Home', icon: Home },
-      { screen: 'tools', label: 'Tools', icon: LayoutGrid },
-      { screen: 'contacts', label: 'Contacts', icon: Users },
+      { screen: 'tools', label: 'Checks', icon: LayoutGrid },
       { screen: 'learn', label: 'Learn', icon: BookOpen },
-      { screen: 'recovery', label: 'Recover', icon: LifeBuoy },
+      { screen: 'activity', label: 'Alerts', icon: Bell, badge: unreadCount },
+      { screen: 'settings', label: 'Settings', icon: SettingsIcon },
     ];
-
     return (
       <View style={styles.bottomNav}>
         {items.map((item) => {
           const Icon = item.icon;
           const active = screen === item.screen;
           return (
-            <TouchableOpacity key={item.screen} style={styles.navItem} onPress={() => navigate(item.screen)} activeOpacity={0.8}>
+            <TouchableOpacity key={item.screen} style={styles.navItem} onPress={() => navigate(item.screen)} activeOpacity={0.8} accessibilityRole="button" accessibilityState={{ selected: active }}>
               <View style={[styles.navIconWrap, active && styles.navIconWrapActive]}>
-                <Icon size={22} color={active ? colors.brand : colors.muted} strokeWidth={active ? 2.5 : 2.1} />
+                <Icon size={theme.icon(22)} color={active ? theme.colors.brand : theme.colors.muted} strokeWidth={active ? 2.5 : 2.1} />
+                {item.badge ? (
+                  <View style={styles.navBadge}>
+                    <Text style={styles.navBadgeText}>{item.badge > 9 ? '9+' : item.badge}</Text>
+                  </View>
+                ) : null}
               </View>
               <Text style={[styles.navLabel, active && styles.navLabelActive]}>{item.label}</Text>
             </TouchableOpacity>
@@ -685,26 +765,15 @@ export default function App() {
   }
 
   function renderHome() {
+    const simple = prefs.accessibility.simplifiedLanguage;
+    const recent = detections.slice(0, 2);
     return (
       <View style={styles.stack}>
         <View style={styles.homeHero}>
-          <Text style={styles.homeHeroTitle}>Not sure about it?{'\n'}Let's check together.</Text>
-          <Text style={styles.homeHeroText}>Slow down and take one clear step before you reply, pay, or tap a link.</Text>
-        </View>
-
-        <View style={styles.stepFlow}>
-          {openingSteps.map((step, index) => (
-            <React.Fragment key={step.title}>
-              <View style={styles.stepFlowItem}>
-                <View style={styles.stepFlowBadge}>
-                  <Text style={styles.stepFlowBadgeText}>{index + 1}</Text>
-                </View>
-                <Text style={styles.stepFlowTitle}>{step.title}</Text>
-                <Text style={styles.stepFlowDetail}>{step.detail}</Text>
-              </View>
-              {index < openingSteps.length - 1 ? <View style={styles.stepFlowLine} /> : null}
-            </React.Fragment>
-          ))}
+          <Text style={styles.homeHeroTitle}>{simple ? 'Not sure? Check it.' : 'Not sure about it?\nLet’s check together.'}</Text>
+          <Text style={styles.homeHeroText}>
+            {simple ? 'Stop and check before you reply, pay, or tap a link.' : 'Slow down and take one clear step before you reply, pay, or tap a link.'}
+          </Text>
         </View>
 
         <TouchableOpacity
@@ -714,22 +783,24 @@ export default function App() {
             setEmergencyVisible(true);
             navigate('emergency');
           }}
+          accessibilityRole="button"
+          accessibilityLabel="I think this is a scam. Show safety steps."
         >
           <View style={styles.emergencyIcon}>
-            <Siren size={30} color={colors.white} strokeWidth={2.6} />
+            <Siren size={theme.icon(30)} color={theme.colors.onBrand} strokeWidth={2.6} />
           </View>
-          <View style={styles.emergencyTextWrap}>
+          <View style={{ flex: 1 }}>
             <Text style={styles.emergencyTitle}>I think this is a scam</Text>
             <Text style={styles.emergencySub}>Show me the safety steps</Text>
           </View>
-          <ChevronRight size={26} color={colors.white} strokeWidth={2.4} />
+          <ChevronRight size={theme.icon(26)} color={theme.colors.onBrand} strokeWidth={2.4} />
         </TouchableOpacity>
 
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>Quick checks</Text>
-          <TouchableOpacity style={styles.textLinkButton} onPress={() => navigate('tools')}>
+          <TouchableOpacity style={styles.textLinkButton} onPress={() => navigate('tools')} accessibilityRole="button">
             <Text style={styles.inlineLink}>See all</Text>
-            <ChevronRight size={18} color={colors.brand} strokeWidth={2.6} />
+            <ChevronRight size={theme.icon(18)} color={theme.colors.brand} strokeWidth={2.6} />
           </TouchableOpacity>
         </View>
         <View style={styles.tileGrid}>
@@ -737,6 +808,21 @@ export default function App() {
             <GridTile key={tool.screen} {...tool} onPress={() => navigate(tool.screen)} />
           ))}
         </View>
+
+        {recent.length ? (
+          <View style={{ gap: theme.space.sm }}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Recent activity</Text>
+              <TouchableOpacity style={styles.textLinkButton} onPress={() => navigate('activity')} accessibilityRole="button">
+                <Text style={styles.inlineLink}>View all</Text>
+                <ChevronRight size={theme.icon(18)} color={theme.colors.brand} strokeWidth={2.6} />
+              </TouchableOpacity>
+            </View>
+            {recent.map((event) => (
+              <ActivityRow key={event.id} event={event} />
+            ))}
+          </View>
+        ) : null}
 
         <TrustedContactStrip contacts={contacts} onCall={callContact} onText={textContact} onManage={() => navigate('contacts')} />
       </View>
@@ -761,41 +847,39 @@ export default function App() {
     );
   }
 
+
   function renderScamCheck() {
     const aiReady = isAiReviewConfigured();
     const hfReady = isHfSpamCheckConfigured();
     const ocrReady = isHfOcrConfigured();
     const transcriptionReady = isHfTranscriptionConfigured();
-    const showLocalFallback = hasScamInput && !hfReady;
+    const showLocalResult = messageChecked && hasScamInput;
 
     return (
       <View style={styles.stack}>
-        <Text style={styles.screenIntro}>Paste the words. You can also add a screenshot.</Text>
+        <Text style={styles.screenIntro}>Paste the words below. You can also add a screenshot or a voicemail note.</Text>
         <TextInput
           style={styles.textArea}
           value={messageText}
           onChangeText={updateMessageText}
           multiline
           textAlignVertical="top"
-          placeholder="Paste message here"
-          placeholderTextColor="#8A94A6"
+          placeholder="Paste the message or email here"
+          placeholderTextColor={theme.colors.faint}
+          accessibilityLabel="Message text"
         />
         <View style={styles.buttonRow}>
-          <SecondaryAction icon={Upload} label="Add screenshot" onPress={pickScreenshot} />
-          <SecondaryAction icon={FileAudio} label="Add file" onPress={pickVoicemail} />
-          <SecondaryAction
-            icon={X}
-            label="Clear"
-            onPress={clearMessageCheck}
-            disabled={!messageText && !voicemailTranscript && !screenshotUri && !voicemailFile}
-          />
+          <SecondaryAction icon={Upload} label="Screenshot" onPress={pickScreenshot} />
+          <SecondaryAction icon={FileAudio} label="Audio" onPress={pickVoicemail} />
+          <SecondaryAction icon={X} label="Clear" onPress={clearMessageCheck} disabled={!messageText && !voicemailTranscript && !screenshotUri && !voicemailFile} />
         </View>
+
         {screenshotUri ? (
           <View style={styles.attachment}>
             <Image source={{ uri: screenshotUri }} style={styles.attachmentImage as ImageStyle} />
-            <View style={styles.attachmentText}>
+            <View style={{ flex: 1 }}>
               <Text style={styles.attachmentTitle}>Screenshot attached</Text>
-              <Text style={styles.smallMuted}>{screenshotBase64 ? 'Ready for AI review.' : 'Screenshot saved here.'}</Text>
+              <Text style={styles.smallMuted}>{screenshotBase64 ? 'Ready to read or review.' : 'Saved here.'}</Text>
             </View>
             <TouchableOpacity
               onPress={() => {
@@ -806,11 +890,13 @@ export default function App() {
                 setOcrText('');
                 setOcrError('');
               }}
+              accessibilityLabel="Remove screenshot"
             >
-              <X size={22} color="#667085" />
+              <X size={theme.icon(22)} color={theme.colors.muted} />
             </TouchableOpacity>
           </View>
         ) : null}
+
         {voicemailFile ? (
           <AttachmentLabel
             icon={FileAudio}
@@ -823,67 +909,48 @@ export default function App() {
             }}
           />
         ) : null}
+
         <TextInput
           style={styles.textAreaSmall}
           value={voicemailTranscript}
           onChangeText={updateVoicemailTranscript}
           multiline
           textAlignVertical="top"
-          placeholder="Optional: paste a voicemail transcript here."
-          placeholderTextColor="#8A94A6"
+          placeholder="Optional: notes or a voicemail transcript"
+          placeholderTextColor={theme.colors.faint}
+          accessibilityLabel="Optional transcript"
         />
+
+        <Btn label="Check this message" icon={ShieldCheck} onPress={runMessageCheck} disabled={!hasMessageReviewInput} />
+
         {screenshotBase64 ? (
           <View style={styles.aiActionBox}>
-            <SecondaryAction
-              icon={Search}
-              label={ocrLoading ? 'Reading...' : 'Read screenshot'}
-              onPress={runScreenshotOcr}
-              disabled={ocrLoading || !ocrReady}
-            />
-            {!ocrReady ? <Text style={styles.smallMuted}>Screenshot reading is off. Add a Hugging Face key to turn it on.</Text> : null}
+            <View style={styles.buttonRow}>
+              <SecondaryAction icon={Search} label={ocrLoading ? 'Reading…' : 'Read screenshot'} onPress={runScreenshotOcr} disabled={ocrLoading || !ocrReady} />
+              {aiReady ? <SecondaryAction icon={ShieldCheck} label={aiReviewLoading ? 'Reviewing…' : 'AI review'} onPress={runAiReview} disabled={aiReviewLoading} /> : null}
+            </View>
+            {!ocrReady ? <Text style={styles.smallMuted}>Screenshot reading needs a Hugging Face key.</Text> : null}
             {ocrError ? <Text style={styles.errorText}>{ocrError}</Text> : null}
+            {aiReviewError ? <Text style={styles.errorText}>{aiReviewError}</Text> : null}
           </View>
         ) : null}
         {ocrText ? <ExtractedTextPanel title="Text from screenshot" text={ocrText} /> : null}
+
         {voicemailUri ? (
           <View style={styles.aiActionBox}>
-            <SecondaryAction
-              icon={Mic}
-              label={transcriptionLoading ? 'Transcribing...' : 'Transcribe file'}
-              onPress={runAudioTranscription}
-              disabled={transcriptionLoading || !transcriptionReady}
-            />
-            {!transcriptionReady ? <Text style={styles.smallMuted}>Audio transcription is off. Add a Hugging Face key to turn it on.</Text> : null}
+            <SecondaryAction icon={Mic} label={transcriptionLoading ? 'Transcribing…' : 'Transcribe audio'} onPress={runAudioTranscription} disabled={transcriptionLoading || !transcriptionReady} />
+            {!transcriptionReady ? <Text style={styles.smallMuted}>Audio transcription needs a Hugging Face key.</Text> : null}
             {transcriptionError ? <Text style={styles.errorText}>{transcriptionError}</Text> : null}
           </View>
         ) : null}
-        <View style={styles.aiActionBox}>
-          <SecondaryAction
-            icon={ShieldAlert}
-            label={hfSpamLoading ? 'Checking...' : 'SMS spam check'}
-            onPress={runHfSpamCheck}
-            disabled={!hasHfTextInput || hfSpamLoading || !hfReady}
-          />
-          {!hfReady && hasHfTextInput ? <Text style={styles.smallMuted}>SMS spam check is off. Add a Hugging Face key to turn it on.</Text> : null}
-          {!hasHfTextInput && screenshotBase64 ? <Text style={styles.smallMuted}>The SMS model reads pasted words, not screenshots.</Text> : null}
-          {hfSpamNotice ? <Text style={styles.smallMuted}>{hfSpamNotice}</Text> : null}
-          {hfSpamError ? <Text style={styles.errorText}>{hfSpamError}</Text> : null}
-        </View>
+
+        {hfSpamLoading ? <Text style={styles.smallMuted}>Running an extra check…</Text> : null}
+        {hfSpamNotice ? <Text style={styles.smallMuted}>{hfSpamNotice}</Text> : null}
+        {hfSpamError ? <Text style={styles.errorText}>{hfSpamError}</Text> : null}
         {hfSpamReview ? <SpamModelPanel review={hfSpamReview} /> : null}
-        {aiReady ? (
-          <View style={styles.aiActionBox}>
-          <SecondaryAction
-            icon={ShieldCheck}
-              label={aiReviewLoading ? 'Reading...' : 'Screenshot review'}
-            onPress={runAiReview}
-              disabled={!screenshotBase64 || aiReviewLoading || !aiReady}
-          />
-            {!aiReady && screenshotBase64 ? <Text style={styles.smallMuted}>Screenshot reading is off. Paste the visible words to check them.</Text> : null}
-          {aiReviewError ? <Text style={styles.errorText}>{aiReviewError}</Text> : null}
-        </View>
-        ) : null}
         {aiReview ? <AiReviewPanel review={aiReview} /> : null}
-        {showLocalFallback ? <RiskPanel result={scamResult} /> : null}
+        {showLocalResult ? <RiskPanel result={scamResult} /> : null}
+        {!hfReady && showLocalResult ? <Text style={styles.smallMuted}>Tip: add a Hugging Face key in the project to enable a second AI opinion.</Text> : null}
       </View>
     );
   }
@@ -891,13 +958,13 @@ export default function App() {
   function renderCallCheck() {
     return (
       <View style={styles.stack}>
-        <Text style={styles.screenIntro}>Answer yes or no.</Text>
-        <ToggleRow label="Asked for money?" value={callAnswers.money} onValueChange={(value) => setCallAnswers({ ...callAnswers, money: value })} />
-        <ToggleRow label="Said not to tell anyone?" value={callAnswers.secret} onValueChange={(value) => setCallAnswers({ ...callAnswers, secret: value })} />
-        <ToggleRow label="Asked for a code?" value={callAnswers.code} onValueChange={(value) => setCallAnswers({ ...callAnswers, code: value })} />
-        <ToggleRow label="Asked to control your device?" value={callAnswers.remote} onValueChange={(value) => setCallAnswers({ ...callAnswers, remote: value })} />
-        <ToggleRow label="Threatened arrest or account closing?" value={callAnswers.threat} onValueChange={(value) => setCallAnswers({ ...callAnswers, threat: value })} />
-        <ToggleRow label="Trusting caller ID only?" value={callAnswers.callerId} onValueChange={(value) => setCallAnswers({ ...callAnswers, callerId: value })} />
+        <Text style={styles.screenIntro}>Answer yes or no about the call.</Text>
+        <ToggleRow label="Asked for money?" value={callAnswers.money} onValueChange={(v) => setCallAnswers({ ...callAnswers, money: v })} />
+        <ToggleRow label="Said not to tell anyone?" value={callAnswers.secret} onValueChange={(v) => setCallAnswers({ ...callAnswers, secret: v })} />
+        <ToggleRow label="Asked for a code?" value={callAnswers.code} onValueChange={(v) => setCallAnswers({ ...callAnswers, code: v })} />
+        <ToggleRow label="Asked to control your device?" value={callAnswers.remote} onValueChange={(v) => setCallAnswers({ ...callAnswers, remote: v })} />
+        <ToggleRow label="Threatened arrest or account closing?" value={callAnswers.threat} onValueChange={(v) => setCallAnswers({ ...callAnswers, threat: v })} />
+        <ToggleRow label="Trusting caller ID only?" value={callAnswers.callerId} onValueChange={(v) => setCallAnswers({ ...callAnswers, callerId: v })} />
         <SecondaryAction icon={X} label="Clear answers" onPress={() => setCallAnswers(initialCallAnswers)} disabled={!hasCallAnswers} />
         {hasCallAnswers ? <RiskPanel result={callResult} /> : null}
         <TrustedContactStrip contacts={contacts} onCall={callContact} onText={textContact} />
@@ -909,7 +976,7 @@ export default function App() {
     return (
       <View style={styles.stack}>
         <View style={styles.stopPanel}>
-          <Siren size={42} color="#B42318" strokeWidth={2.8} />
+          <Siren size={theme.icon(42)} color={theme.colors.danger} strokeWidth={2.8} />
           <Text style={styles.stopTitle}>Stop. You have time.</Text>
           <Text style={styles.stopText}>A real bank, agency, or family member can wait.</Text>
         </View>
@@ -922,10 +989,7 @@ export default function App() {
           </View>
         ))}
         <TrustedContactStrip contacts={contacts} onCall={callContact} onText={textContact} urgent />
-        <TouchableOpacity style={styles.primaryButton} onPress={() => Linking.openURL('https://reportfraud.ftc.gov/')}>
-          <ExternalLink size={20} color="#FFFFFF" />
-          <Text style={styles.primaryButtonText}>Open ReportFraud.ftc.gov</Text>
-        </TouchableOpacity>
+        <Btn label="Report fraud at ReportFraud.ftc.gov" icon={ExternalLink} onPress={() => Linking.openURL('https://reportfraud.ftc.gov/')} />
       </View>
     );
   }
@@ -933,59 +997,47 @@ export default function App() {
   function renderContacts() {
     return (
       <View style={styles.stack}>
-        <Text style={styles.screenIntro}>Save up to two people you trust.</Text>
+        <Text style={styles.screenIntro}>Save up to two people you trust, so help is always one tap away.</Text>
         {contactDrafts.map((contact, index) => (
-          <View style={styles.card} key={contact.id}>
+          <Card key={contact.id}>
             <Text style={styles.cardTitle}>{contact.label}</Text>
             <TextInput
               style={styles.input}
               value={contact.name}
-              onChangeText={(value) =>
-                setContactDrafts((current) => current.map((item, itemIndex) => (itemIndex === index ? { ...item, name: value } : item)))
-              }
+              onChangeText={(value) => setContactDrafts((current) => current.map((item, i) => (i === index ? { ...item, name: value } : item)))}
               placeholder={index === 0 ? 'Daughter, son, caregiver, friend' : 'Backup contact'}
-              placeholderTextColor="#8A94A6"
+              placeholderTextColor={theme.colors.faint}
             />
             <TextInput
               style={styles.input}
               value={contact.phone}
-              onChangeText={(value) =>
-                setContactDrafts((current) => current.map((item, itemIndex) => (itemIndex === index ? { ...item, phone: value } : item)))
-              }
+              onChangeText={(value) => setContactDrafts((current) => current.map((item, i) => (i === index ? { ...item, phone: value } : item)))}
               keyboardType="phone-pad"
               placeholder="Phone number"
-              placeholderTextColor="#8A94A6"
+              placeholderTextColor={theme.colors.faint}
             />
             <View style={styles.buttonRow}>
               <SecondaryAction icon={CheckCircle2} label="Save" onPress={() => saveContactDraft(index)} />
               <SecondaryAction icon={Phone} label="Call" onPress={() => callContact(contact)} disabled={!contact.phone.trim()} />
               <SecondaryAction icon={MessageCircle} label="Text" onPress={() => textContact(contact)} disabled={!contact.phone.trim()} />
             </View>
-          </View>
+          </Card>
         ))}
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Family Verification Phrase</Text>
-          <Text style={styles.cardBody}>Use this for family emergency calls. Keep it private.</Text>
-          <TextInput
-            style={styles.input}
-            value={familyPhrase}
-            onChangeText={setFamilyPhrase}
-            placeholder="Example: blue porch light"
-            placeholderTextColor="#8A94A6"
-          />
-          <TouchableOpacity style={styles.primaryButton} onPress={savePhrase}>
-            <ShieldCheck size={20} color="#FFFFFF" />
-            <Text style={styles.primaryButtonText}>Save phrase</Text>
-          </TouchableOpacity>
-        </View>
+        <Card>
+          <Text style={styles.cardTitle}>Family verification phrase</Text>
+          <Text style={styles.cardBody}>Agree on a private phrase with your family. Ask for it during any emergency call to confirm it is really them.</Text>
+          <TextInput style={styles.input} value={familyPhrase} onChangeText={setFamilyPhrase} placeholder="Example: blue porch light" placeholderTextColor={theme.colors.faint} />
+          <Btn label="Save phrase" icon={ShieldCheck} onPress={savePhrase} />
+        </Card>
       </View>
     );
   }
 
+
   function renderLinkCheck() {
     return (
       <View style={styles.stack}>
-        <Text style={styles.screenIntro}>Paste a link before opening it.</Text>
+        <Text style={styles.screenIntro}>Paste a link before opening it. We check the real destination.</Text>
         <TextInput
           style={styles.input}
           value={urlText}
@@ -993,17 +1045,13 @@ export default function App() {
           autoCapitalize="none"
           autoCorrect={false}
           placeholder="https://example.com"
-          placeholderTextColor="#8A94A6"
+          placeholderTextColor={theme.colors.faint}
         />
         {hasUrlInput ? <RiskPanel result={linkResult} /> : null}
         <SecondaryAction icon={X} label="Clear" onPress={() => setUrlText('')} disabled={!hasUrlInput} />
-        <TouchableOpacity
-          style={[styles.secondaryButtonWide, !hasUrlInput && styles.disabledButton]}
-          onPress={() => openUrl(urlText)}
-          disabled={!hasUrlInput}
-        >
-          <ExternalLink size={20} color={hasUrlInput ? '#0B6E69' : '#98A2B3'} />
-          <Text style={[styles.secondaryButtonWideText, !hasUrlInput && styles.disabledText]}>Open only if expected</Text>
+        <TouchableOpacity style={[styles.secondaryButtonWide, !hasUrlInput && styles.disabledButton]} onPress={() => openUrl(urlText)} disabled={!hasUrlInput}>
+          <ExternalLink size={theme.icon(20)} color={hasUrlInput ? theme.colors.brand : theme.colors.faint} />
+          <Text style={[styles.secondaryButtonWideText, !hasUrlInput && styles.disabledText]}>Open only if you expected it</Text>
         </TouchableOpacity>
       </View>
     );
@@ -1011,31 +1059,19 @@ export default function App() {
 
   function renderQrCheck() {
     const canScan = cameraPermission?.granted;
-
     return (
       <View style={styles.stack}>
-        <Text style={styles.screenIntro}>Scan first. Open only after checking.</Text>
+        <Text style={styles.screenIntro}>Scan first, then open only after checking.</Text>
         {!canScan ? (
-          <TouchableOpacity style={styles.primaryButton} onPress={requestCameraPermission}>
-            <Camera size={20} color="#FFFFFF" />
-          <Text style={styles.primaryButtonText}>Allow camera for QR scan</Text>
-          </TouchableOpacity>
+          <Btn label="Allow camera for QR scan" icon={Camera} onPress={requestCameraPermission} />
         ) : null}
         {canScan && scanning ? (
           <View style={styles.cameraFrame}>
-            <CameraView
-              style={styles.cameraView}
-              facing="back"
-              onBarcodeScanned={onQrScanned}
-              barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
-            />
+            <CameraView style={styles.cameraView} facing="back" onBarcodeScanned={onQrScanned} barcodeScannerSettings={{ barcodeTypes: ['qr'] }} />
             <Text style={styles.cameraHint}>Point at a QR code</Text>
           </View>
         ) : (
-          <TouchableOpacity style={styles.primaryButton} onPress={() => setScanning(true)} disabled={!canScan}>
-            <QrCode size={20} color="#FFFFFF" />
-            <Text style={styles.primaryButtonText}>{qrValue ? 'Scan another QR code' : 'Start QR scan'}</Text>
-          </TouchableOpacity>
+          <Btn label={qrValue ? 'Scan another QR code' : 'Start QR scan'} icon={QrCode} onPress={() => setScanning(true)} disabled={!canScan} />
         )}
         <TextInput
           style={styles.input}
@@ -1044,16 +1080,12 @@ export default function App() {
           autoCapitalize="none"
           autoCorrect={false}
           placeholder="QR destination appears here"
-          placeholderTextColor="#8A94A6"
+          placeholderTextColor={theme.colors.faint}
         />
         {hasQrInput ? <RiskPanel result={qrResult} /> : null}
         <SecondaryAction icon={X} label="Clear" onPress={() => setQrValue('')} disabled={!hasQrInput} />
-        <TouchableOpacity
-          style={[styles.secondaryButtonWide, !hasQrInput && styles.disabledButton]}
-          onPress={() => openUrl(qrValue)}
-          disabled={!hasQrInput}
-        >
-          <ExternalLink size={20} color={hasQrInput ? '#0B6E69' : '#98A2B3'} />
+        <TouchableOpacity style={[styles.secondaryButtonWide, !hasQrInput && styles.disabledButton]} onPress={() => openUrl(qrValue)} disabled={!hasQrInput}>
+          <ExternalLink size={theme.icon(20)} color={hasQrInput ? theme.colors.brand : theme.colors.faint} />
           <Text style={[styles.secondaryButtonWideText, !hasQrInput && styles.disabledText]}>Open only if verified</Text>
         </TouchableOpacity>
       </View>
@@ -1063,22 +1095,16 @@ export default function App() {
   function renderVoiceClone() {
     return (
       <View style={styles.stack}>
-        <Text style={styles.screenIntro}>Use this when a caller sounds like family.</Text>
-        <ToggleRow label="Says they are family?" value={voiceAnswers.family} onValueChange={(value) => setVoiceAnswers({ ...voiceAnswers, family: value })} />
-        <ToggleRow label="Needs money now?" value={voiceAnswers.money} onValueChange={(value) => setVoiceAnswers({ ...voiceAnswers, money: value })} />
-        <ToggleRow label="Says keep it secret?" value={voiceAnswers.secret} onValueChange={(value) => setVoiceAnswers({ ...voiceAnswers, secret: value })} />
-        <ToggleRow label="Story feels shocking?" value={voiceAnswers.emotional} onValueChange={(value) => setVoiceAnswers({ ...voiceAnswers, emotional: value })} />
-        <View style={styles.card}>
+        <Text style={styles.screenIntro}>Use this when a caller sounds like family but something feels off.</Text>
+        <ToggleRow label="Says they are family?" value={voiceAnswers.family} onValueChange={(v) => setVoiceAnswers({ ...voiceAnswers, family: v })} />
+        <ToggleRow label="Needs money now?" value={voiceAnswers.money} onValueChange={(v) => setVoiceAnswers({ ...voiceAnswers, money: v })} />
+        <ToggleRow label="Says keep it secret?" value={voiceAnswers.secret} onValueChange={(v) => setVoiceAnswers({ ...voiceAnswers, secret: v })} />
+        <ToggleRow label="Story feels shocking?" value={voiceAnswers.emotional} onValueChange={(v) => setVoiceAnswers({ ...voiceAnswers, emotional: v })} />
+        <Card>
           <Text style={styles.cardTitle}>Verification phrase</Text>
-          <TextInput
-            style={styles.input}
-            value={familyPhrase}
-            onChangeText={setFamilyPhrase}
-            placeholder="Private family phrase"
-            placeholderTextColor="#8A94A6"
-          />
+          <TextInput style={styles.input} value={familyPhrase} onChangeText={setFamilyPhrase} placeholder="Private family phrase" placeholderTextColor={theme.colors.faint} />
           <SecondaryAction icon={ShieldCheck} label="Save phrase" onPress={savePhrase} />
-        </View>
+        </Card>
         <SecondaryAction icon={X} label="Clear answers" onPress={() => setVoiceAnswers(initialVoiceAnswers)} disabled={!hasVoiceAnswers} />
         {hasVoiceAnswers ? <RiskPanel result={voiceResult} /> : null}
       </View>
@@ -1095,12 +1121,11 @@ export default function App() {
       venmo: 'Venmo',
       bankCard: 'Card or bank payment',
     };
-
     return (
       <View style={styles.stack}>
         <Text style={styles.screenIntro}>Choose the payment they asked for.</Text>
         {Object.entries(labels).map(([key, label]) => (
-          <ToggleRow key={key} label={label} value={paymentAnswers[key]} onValueChange={(value) => setPaymentAnswers({ ...paymentAnswers, [key]: value })} />
+          <ToggleRow key={key} label={label} value={paymentAnswers[key]} onValueChange={(v) => setPaymentAnswers({ ...paymentAnswers, [key]: v })} />
         ))}
         <SecondaryAction icon={X} label="Clear answers" onPress={() => setPaymentAnswers(initialPayments)} disabled={!hasPaymentAnswers} />
         {hasPaymentAnswers ? <RiskPanel result={paymentResult} /> : null}
@@ -1113,8 +1138,8 @@ export default function App() {
       <View style={styles.stack}>
         <View style={styles.sectionHeader}>
           <Text style={styles.screenIntroNarrow}>Current warnings from public safety sources.</Text>
-          <TouchableOpacity style={styles.refreshButton} onPress={refreshAlerts}>
-            <Newspaper size={18} color="#0B6E69" />
+          <TouchableOpacity style={styles.refreshButton} onPress={refreshAlerts} accessibilityRole="button">
+            <Newspaper size={theme.icon(18)} color={theme.colors.brand} />
             <Text style={styles.refreshText}>Refresh</Text>
           </TouchableOpacity>
         </View>
@@ -1132,40 +1157,28 @@ export default function App() {
     );
   }
 
+
   function renderLearn() {
+    const modules = modulesForDifficulty(prefs.difficulty);
+    const done = progress.completedWeeks.filter((id) => modules.some((m) => m.id === id)).length;
+    const pct = modules.length ? Math.round((done / modules.length) * 100) : 0;
     return (
       <View style={styles.stack}>
-        <Text style={styles.screenIntro}>Short lessons. Open one at a time.</Text>
-        {lessons.map((lesson) => {
-          const open = lessonOpen === lesson.id;
-          return (
-            <TouchableOpacity key={lesson.id} style={styles.lessonItem} onPress={() => setLessonOpen(open ? null : lesson.id)} activeOpacity={0.78}>
-              <View style={styles.lessonHeader}>
-                <View>
-                  <Text style={styles.lessonTitle}>{lesson.title}</Text>
-                  <Text style={styles.smallMuted}>{lesson.minutes} minute lesson</Text>
-                </View>
-                <GraduationCap size={24} color="#245B8C" />
-              </View>
-              <Text style={styles.cardBody}>{lesson.summary}</Text>
-              {open ? (
-                <View style={styles.lessonBody}>
-                  {lesson.steps.map((step) => (
-                    <View key={step} style={styles.bulletRow}>
-                      <CheckCircle2 size={19} color="#0B6E69" />
-                      <Text style={styles.bulletText}>{step}</Text>
-                    </View>
-                  ))}
-                  <Text style={styles.rememberText}>{lesson.remember}</Text>
-                </View>
-              ) : null}
-            </TouchableOpacity>
-          );
-        })}
-        <TouchableOpacity style={styles.primaryButton} onPress={() => navigate('practice')}>
-          <Trophy size={20} color="#FFFFFF" />
-          <Text style={styles.primaryButtonText}>Start practice</Text>
-        </TouchableOpacity>
+        <View style={styles.confidencePanel}>
+          <View style={styles.metricTopRow}>
+            <Text style={styles.metricLabel}>Your learning journey</Text>
+            <Text style={styles.metricSmall}>
+              {done} of {modules.length} weeks
+            </Text>
+          </View>
+          <Text style={styles.metricValue}>{pct}%</Text>
+          <ProgressBar value={pct === 0 ? 2 : pct} />
+        </View>
+        <Text style={styles.screenIntro}>One short lesson each week: read it, see a real example, then try the quick question.</Text>
+        {modules.map((module) => (
+          <WeekCard key={module.id} module={module} />
+        ))}
+        <Btn label="Extra practice quiz" icon={Trophy} variant="secondary" onPress={() => navigate('practice')} />
       </View>
     );
   }
@@ -1173,15 +1186,14 @@ export default function App() {
   function renderPractice() {
     const options: Array<'safe' | 'suspicious' | 'scam'> = ['safe', 'suspicious', 'scam'];
     const answered = selectedPractice !== null;
-
     return (
       <View style={styles.stack}>
         <View style={styles.confidencePanel}>
           <View style={styles.metricTopRow}>
-            <Text style={styles.metricLabel}>Question {practiceNumber} of {practiceExamples.length}</Text>
-            <Text style={styles.metricSmall}>
-              {practiceStats.answered ? `${practiceStats.correct}/${practiceStats.answered} correct` : storedConfidence ? 'Last score' : 'Start quiz'}
+            <Text style={styles.metricLabel}>
+              Question {practiceNumber} of {practiceExamples.length}
             </Text>
+            <Text style={styles.metricSmall}>{practiceStats.answered ? `${practiceStats.correct}/${practiceStats.answered} correct` : 'Start quiz'}</Text>
           </View>
           <Text style={styles.metricValue}>{quizScore}%</Text>
           <ProgressBar value={quizScore} />
@@ -1204,11 +1216,11 @@ export default function App() {
                 disabled={answered}
               >
                 {isCorrect ? (
-                  <CheckCircle2 size={21} color="#0B6E69" />
+                  <CheckCircle2 size={theme.icon(22)} color={theme.colors.low} />
                 ) : isWrong ? (
-                  <X size={21} color="#B42318" />
+                  <X size={theme.icon(22)} color={theme.colors.danger} />
                 ) : (
-                  <Circle size={21} color={isSelected ? '#245B8C' : '#667085'} />
+                  <Circle size={theme.icon(22)} color={isSelected ? theme.colors.info : theme.colors.muted} />
                 )}
                 <Text style={styles.answerText}>{option === 'safe' ? 'Safe' : option === 'suspicious' ? 'Not sure' : 'Scam'}</Text>
               </TouchableOpacity>
@@ -1223,14 +1235,11 @@ export default function App() {
             <Text style={styles.cardBody}>{practice.explanation}</Text>
             {practice.redFlags.map((flag) => (
               <View key={flag} style={styles.bulletRow}>
-                <AlertTriangle size={18} color="#C2410C" />
+                <AlertTriangle size={theme.icon(18)} color={theme.colors.high} />
                 <Text style={styles.bulletText}>{flag}</Text>
               </View>
             ))}
-            <TouchableOpacity style={styles.primaryButton} onPress={nextPractice}>
-              <ChevronRight size={20} color="#FFFFFF" />
-              <Text style={styles.primaryButtonText}>Next example</Text>
-            </TouchableOpacity>
+            <Btn label="Next example" icon={ChevronRight} onPress={nextPractice} />
             <SecondaryAction icon={X} label="Restart quiz" onPress={restartPractice} />
           </View>
         ) : null}
@@ -1241,26 +1250,20 @@ export default function App() {
   function renderRecovery() {
     return (
       <View style={styles.stack}>
-        <Text style={styles.screenIntro}>If anything was shared or paid, start here.</Text>
+        <Text style={styles.screenIntro}>If anything was shared or paid, act quickly. Start here.</Text>
         {recoverySteps.map((group) => (
-          <View key={group.title} style={styles.card}>
+          <Card key={group.title}>
             <Text style={styles.cardTitle}>{group.title}</Text>
             {group.items.map((item) => (
               <View key={item} style={styles.bulletRow}>
-                <CheckCircle2 size={19} color="#0B6E69" />
+                <CheckCircle2 size={theme.icon(19)} color={theme.colors.brand} />
                 <Text style={styles.bulletText}>{item}</Text>
               </View>
             ))}
-          </View>
+          </Card>
         ))}
-        <TouchableOpacity style={styles.primaryButton} onPress={() => Linking.openURL('https://reportfraud.ftc.gov/')}>
-          <ExternalLink size={20} color="#FFFFFF" />
-          <Text style={styles.primaryButtonText}>Report fraud to FTC</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.secondaryButtonWide} onPress={() => Linking.openURL('https://www.ic3.gov/')}>
-          <ExternalLink size={20} color="#0B6E69" />
-          <Text style={styles.secondaryButtonWideText}>Report internet fraud to IC3</Text>
-        </TouchableOpacity>
+        <Btn label="Report fraud to the FTC" icon={ExternalLink} onPress={() => Linking.openURL('https://reportfraud.ftc.gov/')} />
+        <Btn label="Report internet fraud to IC3" icon={ExternalLink} variant="secondary" onPress={() => Linking.openURL('https://www.ic3.gov/')} />
       </View>
     );
   }
@@ -1268,24 +1271,30 @@ export default function App() {
   function renderPhoneLookup() {
     return (
       <View style={styles.stack}>
-        <Text style={styles.screenIntro}>Paste a number. Unknown numbers still need checking.</Text>
+        <Text style={styles.screenIntro}>Check an unknown or incoming number for spoofing and scam signs. This runs entirely on your device.</Text>
         <TextInput
           style={styles.input}
           value={phoneNumber}
-          onChangeText={setPhoneNumber}
+          onChangeText={(v) => {
+            setPhoneNumber(v);
+            setCallRisk(null);
+          }}
           keyboardType="phone-pad"
-          placeholder="Phone number"
-          placeholderTextColor="#8A94A6"
+          placeholder="Phone number (for example +1 202 555 0140)"
+          placeholderTextColor={theme.colors.faint}
         />
-        {hasPhoneInput ? <RiskPanel result={phoneResult} /> : null}
-        <SecondaryAction icon={X} label="Clear" onPress={() => setPhoneNumber('')} disabled={!hasPhoneInput} />
-        <TouchableOpacity
-          style={[styles.secondaryButtonWide, !hasPhoneInput && styles.disabledButton]}
-          onPress={openSearchForPhone}
-          disabled={!hasPhoneInput}
-        >
-          <Search size={20} color={hasPhoneInput ? '#0B6E69' : '#98A2B3'} />
-          <Text style={[styles.secondaryButtonWideText, !hasPhoneInput && styles.disabledText]}>Search public scam reports</Text>
+        <TextInput
+          style={styles.input}
+          value={claimedIdentity}
+          onChangeText={setClaimedIdentity}
+          placeholder="Who do they claim to be? (optional)"
+          placeholderTextColor={theme.colors.faint}
+        />
+        <Btn label="Check this number" icon={ShieldCheck} onPress={runCallRiskCheck} disabled={!hasPhoneInput} />
+        {callRisk ? <CallRiskPanel result={callRisk} /> : null}
+        <TouchableOpacity style={[styles.secondaryButtonWide, !hasPhoneInput && styles.disabledButton]} onPress={openSearchForPhone} disabled={!hasPhoneInput}>
+          <Search size={theme.icon(20)} color={hasPhoneInput ? theme.colors.brand : theme.colors.faint} />
+          <Text style={[styles.secondaryButtonWideText, !hasPhoneInput && styles.disabledText]}>Search community scam reports</Text>
         </TouchableOpacity>
       </View>
     );
@@ -1296,11 +1305,8 @@ export default function App() {
     const transcriptionReady = isHfTranscriptionConfigured();
     return (
       <View style={styles.stack}>
-        <Text style={styles.screenIntro}>Upload a voicemail. The app can transcribe it.</Text>
-        <TouchableOpacity style={styles.primaryButton} onPress={pickVoicemail}>
-          <FileAudio size={20} color="#FFFFFF" />
-          <Text style={styles.primaryButtonText}>Upload voicemail</Text>
-        </TouchableOpacity>
+        <Text style={styles.screenIntro}>Upload a voicemail to transcribe it, or paste the transcript yourself.</Text>
+        <Btn label="Upload voicemail" icon={FileAudio} onPress={pickVoicemail} />
         {voicemailFile ? (
           <AttachmentLabel
             icon={FileAudio}
@@ -1315,13 +1321,8 @@ export default function App() {
         ) : null}
         {voicemailUri ? (
           <View style={styles.aiActionBox}>
-            <SecondaryAction
-              icon={Mic}
-              label={transcriptionLoading ? 'Transcribing...' : 'Transcribe file'}
-              onPress={runAudioTranscription}
-              disabled={transcriptionLoading || !transcriptionReady}
-            />
-            {!transcriptionReady ? <Text style={styles.smallMuted}>Audio transcription is off. Add a Hugging Face key to turn it on.</Text> : null}
+            <SecondaryAction icon={Mic} label={transcriptionLoading ? 'Transcribing…' : 'Transcribe file'} onPress={runAudioTranscription} disabled={transcriptionLoading || !transcriptionReady} />
+            {!transcriptionReady ? <Text style={styles.smallMuted}>Audio transcription needs a Hugging Face key.</Text> : null}
             {transcriptionError ? <Text style={styles.errorText}>{transcriptionError}</Text> : null}
           </View>
         ) : null}
@@ -1331,8 +1332,8 @@ export default function App() {
           onChangeText={updateVoicemailTranscript}
           multiline
           textAlignVertical="top"
-          placeholder="Paste voicemail transcript here."
-          placeholderTextColor="#8A94A6"
+          placeholder="Paste voicemail transcript here"
+          placeholderTextColor={theme.colors.faint}
         />
         <SecondaryAction
           icon={X}
@@ -1347,6 +1348,28 @@ export default function App() {
           disabled={!voicemailTranscript && !voicemailFile}
         />
         {hasVoicemailInput ? <RiskPanel result={voicemailResult} /> : null}
+      </View>
+    );
+  }
+
+  function renderActivity() {
+    if (!detections.length) {
+      return (
+        <View style={styles.emptyState}>
+          <View style={styles.emptyIcon}>
+            <Bell size={theme.icon(34)} color={theme.colors.brand} strokeWidth={2.2} />
+          </View>
+          <Text style={styles.cardTitle}>No alerts yet</Text>
+          <Text style={[styles.cardBody, { textAlign: 'center' }]}>When a check finds a possible scam call, message, or link, it will appear here so you can review it any time.</Text>
+        </View>
+      );
+    }
+    return (
+      <View style={styles.stack}>
+        <Text style={styles.screenIntro}>Every check that found a possible risk is saved here on your device.</Text>
+        {detections.map((event) => (
+          <ActivityRow key={event.id} event={event} detailed />
+        ))}
       </View>
     );
   }
@@ -1383,6 +1406,10 @@ export default function App() {
         return renderPhoneLookup();
       case 'voicemail':
         return renderVoicemail();
+      case 'activity':
+        return renderActivity();
+      case 'settings':
+        return <Settings />;
       default:
         return renderHome();
     }
@@ -1390,7 +1417,7 @@ export default function App() {
 
   return (
     <KeyboardAvoidingView style={styles.app} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <StatusBar style="dark" />
+      <StatusBar style={theme.mode === 'dark' ? 'light' : 'dark'} />
       {renderHeader()}
       <ScrollView ref={scrollRef} style={styles.scroll} contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
         <Animated.View
@@ -1398,14 +1425,7 @@ export default function App() {
             styles.screenTransition,
             {
               opacity: screenAnim,
-              transform: [
-                {
-                  translateY: screenAnim.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: [18, 0],
-                  }),
-                },
-              ],
+              transform: [{ translateY: screenAnim.interpolate({ inputRange: [0, 1], outputRange: [18, 0] }) }],
             },
           ]}
         >
@@ -1417,8 +1437,8 @@ export default function App() {
         <View style={styles.modalScreen}>
           <View style={styles.modalHeader}>
             <Text style={styles.modalTitle}>Scam Safety Steps</Text>
-            <Pressable style={styles.closeButton} onPress={() => setEmergencyVisible(false)}>
-              <X size={24} color="#17212B" />
+            <Pressable style={styles.closeButton} onPress={() => setEmergencyVisible(false)} accessibilityLabel="Close">
+              <X size={theme.icon(24)} color={theme.colors.ink} />
             </Pressable>
           </View>
           <ScrollView contentContainerStyle={styles.modalContent}>{renderEmergency()}</ScrollView>
@@ -1428,33 +1448,25 @@ export default function App() {
   );
 }
 
-function GridTile({
-  label,
-  detail,
-  icon: Icon,
-  onPress,
-  tone,
-}: {
-  label: string;
-  detail: string;
-  icon: LucideIcon;
-  onPress: () => void;
-  tone?: RiskLevel;
-}) {
+
+// ---------------------------------------------------------------------------
+// Presentational components (theme-aware)
+// ---------------------------------------------------------------------------
+
+function GridTile({ label, detail, icon: Icon, onPress, tone }: { label: string; detail: string; icon: LucideIcon; onPress: () => void; tone?: RiskLevel }) {
+  const theme = useTheme();
+  const styles = useMemo(() => makeStyles(theme), [theme]);
   const scale = useRef(new Animated.Value(1)).current;
-  const color = tone ? getLevelColor(tone) : colors.brand;
-  const press = (to: number) =>
+  const color = tone ? levelColor(theme, tone) : theme.colors.brand;
+  const press = (to: number) => {
+    if (theme.reducedMotion) return;
     Animated.spring(scale, { toValue: to, useNativeDriver: true, speed: 40, bounciness: 5 }).start();
+  };
   return (
     <Animated.View style={[styles.tileWrap, { transform: [{ scale }] }]}>
-      <Pressable
-        style={styles.tile}
-        onPress={onPress}
-        onPressIn={() => press(0.96)}
-        onPressOut={() => press(1)}
-      >
-        <View style={[styles.tileIcon, { backgroundColor: tone ? levelBackground(tone) : colors.brandTint }]}>
-          <Icon size={26} color={color} strokeWidth={2.4} />
+      <Pressable style={styles.tile} onPress={onPress} onPressIn={() => press(0.96)} onPressOut={() => press(1)} accessibilityRole="button" accessibilityLabel={`${label}. ${detail}`}>
+        <View style={[styles.tileIcon, { backgroundColor: tone ? levelBg(theme, tone) : theme.colors.brandTint }]}>
+          <Icon size={theme.icon(28)} color={color} strokeWidth={2.4} />
         </View>
         <Text style={styles.tileTitle}>{label}</Text>
         <Text style={styles.tileDetail}>{detail}</Text>
@@ -1464,6 +1476,8 @@ function GridTile({
 }
 
 function ExtractedTextPanel({ title, text }: { title: string; text: string }) {
+  const theme = useTheme();
+  const styles = useMemo(() => makeStyles(theme), [theme]);
   return (
     <View style={styles.scriptBox}>
       <Text style={styles.scriptLabel}>{title}</Text>
@@ -1473,10 +1487,11 @@ function ExtractedTextPanel({ title, text }: { title: string; text: string }) {
 }
 
 function SpamModelPanel({ review }: { review: HfSpamReview }) {
-  const color = getLevelColor(review.level);
-
+  const theme = useTheme();
+  const styles = useMemo(() => makeStyles(theme), [theme]);
+  const color = levelColor(theme, review.level);
   return (
-    <View style={[styles.aiPanel, { backgroundColor: levelBackground(review.level), borderColor: color }]}>
+    <View style={[styles.riskPanel, { backgroundColor: levelBg(theme, review.level), borderColor: color }]}>
       <View style={styles.riskTop}>
         <View style={styles.riskTextColumn}>
           <Text style={[styles.riskLabel, { color }]}>SMS spam check</Text>
@@ -1490,14 +1505,14 @@ function SpamModelPanel({ review }: { review: HfSpamReview }) {
       <Text style={styles.nextTitle}>Why it was flagged</Text>
       {review.reasons.map((reason) => (
         <View key={reason} style={styles.bulletRow}>
-          <AlertTriangle size={18} color={color} />
+          <AlertTriangle size={theme.icon(18)} color={color} />
           <Text style={styles.bulletText}>{reason}</Text>
         </View>
       ))}
       <Text style={styles.nextTitle}>Do next</Text>
       {review.nextSteps.map((step) => (
         <View key={step} style={styles.bulletRow}>
-          <CheckCircle2 size={19} color="#0B6E69" />
+          <CheckCircle2 size={theme.icon(19)} color={theme.colors.brand} />
           <Text style={styles.bulletText}>{step}</Text>
         </View>
       ))}
@@ -1506,10 +1521,11 @@ function SpamModelPanel({ review }: { review: HfSpamReview }) {
 }
 
 function AiReviewPanel({ review }: { review: AiScamReview }) {
-  const color = getLevelColor(review.level);
-
+  const theme = useTheme();
+  const styles = useMemo(() => makeStyles(theme), [theme]);
+  const color = levelColor(theme, review.level);
   return (
-    <View style={[styles.aiPanel, { backgroundColor: levelBackground(review.level), borderColor: color }]}>
+    <View style={[styles.riskPanel, { backgroundColor: levelBg(theme, review.level), borderColor: color }]}>
       <View style={styles.riskTop}>
         <View style={styles.riskTextColumn}>
           <Text style={[styles.riskLabel, { color }]}>AI review</Text>
@@ -1529,14 +1545,14 @@ function AiReviewPanel({ review }: { review: AiScamReview }) {
       <Text style={styles.nextTitle}>Why it was flagged</Text>
       {review.reasons.map((reason) => (
         <View key={reason} style={styles.bulletRow}>
-          <AlertTriangle size={18} color={color} />
+          <AlertTriangle size={theme.icon(18)} color={color} />
           <Text style={styles.bulletText}>{reason}</Text>
         </View>
       ))}
       <Text style={styles.nextTitle}>Do next</Text>
       {review.nextSteps.map((step) => (
         <View key={step} style={styles.bulletRow}>
-          <CheckCircle2 size={19} color="#0B6E69" />
+          <CheckCircle2 size={theme.icon(19)} color={theme.colors.brand} />
           <Text style={styles.bulletText}>{step}</Text>
         </View>
       ))}
@@ -1544,12 +1560,15 @@ function AiReviewPanel({ review }: { review: AiScamReview }) {
   );
 }
 
+
 function RiskPanel({ result }: { result: AnalysisResult }) {
-  const color = getLevelColor(result.level);
+  const theme = useTheme();
+  const styles = useMemo(() => makeStyles(theme), [theme]);
+  const color = levelColor(theme, result.level);
   const visibleFindings = [...result.findings].sort((left, right) => right.points - left.points).slice(0, 3);
   const hiddenFindingCount = Math.max(0, result.findings.length - visibleFindings.length);
   return (
-    <View style={[styles.riskPanel, { backgroundColor: levelBackground(result.level), borderColor: color }]}>
+    <View style={[styles.riskPanel, { backgroundColor: levelBg(theme, result.level), borderColor: color }]}>
       <View style={styles.riskTop}>
         <View style={styles.riskTextColumn}>
           <Text style={[styles.riskLabel, { color }]}>{labelForLevel(result.level)}</Text>
@@ -1565,7 +1584,7 @@ function RiskPanel({ result }: { result: AnalysisResult }) {
           <Text style={styles.nextTitle}>Main signs</Text>
           {visibleFindings.map((finding) => (
             <View key={finding.id} style={styles.findingRow}>
-              <AlertTriangle size={19} color={getLevelColor(finding.severity)} />
+              <AlertTriangle size={theme.icon(19)} color={levelColor(theme, finding.severity)} />
               <View style={styles.findingText}>
                 <Text style={styles.findingTitle}>{finding.title}</Text>
                 <Text style={styles.findingDetail}>{finding.detail}</Text>
@@ -1582,7 +1601,7 @@ function RiskPanel({ result }: { result: AnalysisResult }) {
       <Text style={styles.nextTitle}>Do next</Text>
       {result.nextSteps.map((step) => (
         <View key={step} style={styles.bulletRow}>
-          <CheckCircle2 size={19} color="#0B6E69" />
+          <CheckCircle2 size={theme.icon(19)} color={theme.colors.brand} />
           <Text style={styles.bulletText}>{step}</Text>
         </View>
       ))}
@@ -1590,61 +1609,121 @@ function RiskPanel({ result }: { result: AnalysisResult }) {
   );
 }
 
-function ToggleRow({ label, value, onValueChange }: { label: string; value: boolean; onValueChange: (value: boolean) => void }) {
+function CallRiskPanel({ result }: { result: CallRiskResult }) {
+  const theme = useTheme();
+  const styles = useMemo(() => makeStyles(theme), [theme]);
+  const color = levelColor(theme, result.level);
   return (
-    <View style={styles.toggleRow}>
-      <Text style={styles.toggleLabel}>{label}</Text>
-      <Switch
-        value={value}
-        onValueChange={onValueChange}
-        trackColor={{ false: '#D8DFDA', true: '#BFE3DA' }}
-        thumbColor={value ? '#0B6E69' : '#F9FAFB'}
-      />
+    <View style={[styles.riskPanel, { backgroundColor: levelBg(theme, result.level), borderColor: color }]}>
+      <View style={styles.riskTop}>
+        <View style={styles.riskTextColumn}>
+          <Text style={[styles.riskLabel, { color }]}>{result.uncertain ? 'Possible risk' : 'Spoofing / scam check'}</Text>
+          <Text style={styles.riskHeadline}>{result.headline}</Text>
+        </View>
+        <View style={[styles.scoreBadge, { borderColor: color }]}>
+          <Text style={[styles.scoreText, { color }]}>{result.score}</Text>
+        </View>
+      </View>
+      <Text style={styles.cardBody}>{result.summary}</Text>
+      {result.reasons.length ? (
+        <>
+          <Text style={styles.nextTitle}>What we noticed</Text>
+          {result.reasons.map((reason) => (
+            <View key={reason} style={styles.bulletRow}>
+              <AlertTriangle size={theme.icon(18)} color={color} />
+              <Text style={styles.bulletText}>{reason}</Text>
+            </View>
+          ))}
+        </>
+      ) : null}
+      <View style={styles.scriptBox}>
+        <Text style={styles.scriptLabel}>Recommendation</Text>
+        <Text style={styles.scriptText}>{result.recommendation}</Text>
+      </View>
     </View>
   );
 }
 
-function SecondaryAction({
-  icon: Icon,
-  label,
-  onPress,
-  disabled,
-}: {
-  icon: LucideIcon;
-  label: string;
-  onPress: () => void;
-  disabled?: boolean;
-}) {
+function ToggleRow({ label, value, onValueChange }: { label: string; value: boolean; onValueChange: (value: boolean) => void }) {
+  const theme = useTheme();
+  const styles = useMemo(() => makeStyles(theme), [theme]);
   return (
-    <TouchableOpacity style={[styles.secondaryAction, disabled && styles.disabledButton]} onPress={onPress} disabled={disabled} activeOpacity={0.75}>
-      <Icon size={19} color={disabled ? '#98A2B3' : '#0B6E69'} />
+    <View style={styles.toggleRow}>
+      <Text style={styles.toggleLabel}>{label}</Text>
+      <Switch value={value} onValueChange={onValueChange} trackColor={{ false: theme.colors.lineStrong, true: theme.colors.brand }} thumbColor={theme.colors.white} accessibilityLabel={label} />
+    </View>
+  );
+}
+
+function SecondaryAction({ icon: Icon, label, onPress, disabled }: { icon: LucideIcon; label: string; onPress: () => void; disabled?: boolean }) {
+  const theme = useTheme();
+  const styles = useMemo(() => makeStyles(theme), [theme]);
+  return (
+    <TouchableOpacity style={[styles.secondaryAction, disabled && styles.disabledButton]} onPress={onPress} disabled={disabled} activeOpacity={0.75} accessibilityRole="button" accessibilityState={{ disabled: Boolean(disabled) }}>
+      <Icon size={theme.icon(19)} color={disabled ? theme.colors.faint : theme.colors.brand} />
       <Text style={[styles.secondaryActionText, disabled && styles.disabledText]}>{label}</Text>
     </TouchableOpacity>
   );
 }
 
 function AttachmentLabel({ icon: Icon, label, onClear }: { icon: LucideIcon; label: string; onClear: () => void }) {
+  const theme = useTheme();
+  const styles = useMemo(() => makeStyles(theme), [theme]);
   return (
     <View style={styles.attachment}>
       <View style={styles.toolIcon}>
-        <Icon size={22} color="#0B6E69" />
+        <Icon size={theme.icon(22)} color={theme.colors.brand} />
       </View>
-      <View style={styles.attachmentText}>
+      <View style={{ flex: 1 }}>
         <Text style={styles.attachmentTitle}>{label}</Text>
         <Text style={styles.smallMuted}>Attached on this device</Text>
       </View>
-      <TouchableOpacity onPress={onClear}>
-        <X size={22} color="#667085" />
+      <TouchableOpacity onPress={onClear} accessibilityLabel="Remove attachment">
+        <X size={theme.icon(22)} color={theme.colors.muted} />
       </TouchableOpacity>
     </View>
   );
 }
 
 function ProgressBar({ value }: { value: number }) {
-  const width = `${Math.max(6, Math.min(100, value))}%` as DimensionValue;
+  const theme = useTheme();
+  const styles = useMemo(() => makeStyles(theme), [theme]);
+  const width = `${Math.max(4, Math.min(100, value))}%` as DimensionValue;
   return (
     <View style={styles.progressTrack}>
       <View style={[styles.progressFill, { width }]} />
+    </View>
+  );
+}
+
+function ActivityRow({ event, detailed }: { event: DetectionEvent; detailed?: boolean }) {
+  const theme = useTheme();
+  const styles = useMemo(() => makeStyles(theme), [theme]);
+  const color = levelColor(theme, event.level);
+  const iconMap: Record<DetectionKind, LucideIcon> = {
+    call: PhoneCall,
+    message: MessageCircle,
+    email: Mail,
+    link: LinkIcon,
+    payment: CreditCard,
+    summary: ShieldCheck,
+    lesson: GraduationCap,
+  };
+  const Icon = iconMap[event.kind] ?? ShieldAlert;
+  return (
+    <View style={styles.activityRow}>
+      <View style={[styles.activityIcon, { backgroundColor: levelBg(theme, event.level) }]}>
+        <Icon size={theme.icon(22)} color={color} strokeWidth={2.3} />
+      </View>
+      <View style={{ flex: 1 }}>
+        <Text style={styles.activityTitle}>{event.title}</Text>
+        {detailed ? <Text style={styles.activityDetail}>{event.detail}</Text> : null}
+        <Text style={styles.activityMeta}>
+          {event.uncertain ? 'Possible risk · ' : ''}
+          {formatWhen(event.date)}
+        </Text>
+      </View>
+      {!event.read ? <View style={[styles.unreadDot, { backgroundColor: color }]} /> : null}
     </View>
   );
 }
@@ -1662,14 +1741,16 @@ function TrustedContactStrip({
   onManage?: () => void;
   urgent?: boolean;
 }) {
+  const theme = useTheme();
+  const styles = useMemo(() => makeStyles(theme), [theme]);
   return (
     <View style={[styles.contactStrip, urgent && styles.contactStripUrgent]}>
       <View style={styles.sectionHeader}>
         <Text style={styles.contactStripTitle}>Someone you trust</Text>
         {onManage ? (
-          <TouchableOpacity style={styles.textLinkButton} onPress={onManage}>
+          <TouchableOpacity style={styles.textLinkButton} onPress={onManage} accessibilityRole="button">
             <Text style={styles.inlineLink}>{contacts.length ? 'Edit' : 'Add'}</Text>
-            <ChevronRight size={18} color={colors.brand} strokeWidth={2.6} />
+            <ChevronRight size={theme.icon(18)} color={theme.colors.brand} strokeWidth={2.6} />
           </TouchableOpacity>
         ) : !contacts.length ? (
           <Text style={styles.smallMuted}>None saved</Text>
@@ -1679,17 +1760,17 @@ function TrustedContactStrip({
         contacts.map((contact) => (
           <View key={contact.id} style={styles.contactRow}>
             <View style={styles.contactAvatar}>
-              <Users size={22} color={colors.brand} />
+              <Users size={theme.icon(22)} color={theme.colors.brand} />
             </View>
-            <View style={styles.contactInfo}>
+            <View style={{ flex: 1 }}>
               <Text style={styles.contactName}>{contact.name || contact.label}</Text>
               <Text style={styles.smallMuted}>{contact.phone}</Text>
             </View>
-            <TouchableOpacity style={styles.iconButton} onPress={() => onCall(contact)}>
-              <Phone size={21} color={colors.brand} />
+            <TouchableOpacity style={styles.iconButton} onPress={() => onCall(contact)} accessibilityLabel={`Call ${contact.name || contact.label}`}>
+              <Phone size={theme.icon(21)} color={theme.colors.brand} />
             </TouchableOpacity>
-            <TouchableOpacity style={styles.iconButton} onPress={() => onText(contact)}>
-              <MessageCircle size={21} color={colors.brand} />
+            <TouchableOpacity style={styles.iconButton} onPress={() => onText(contact)} accessibilityLabel={`Text ${contact.name || contact.label}`}>
+              <MessageCircle size={theme.icon(21)} color={theme.colors.brand} />
             </TouchableOpacity>
           </View>
         ))
@@ -1700,992 +1781,436 @@ function TrustedContactStrip({
   );
 }
 
+function WeekCard({ module }: { module: WeeklyModule }) {
+  const theme = useTheme();
+  const styles = useMemo(() => makeStyles(theme), [theme]);
+  const { progress, updateProgress } = useApp();
+  const completed = progress.completedWeeks.includes(module.id);
+  const [open, setOpen] = useState(false);
+  const [answer, setAnswer] = useState<number | null>(null);
+  const answered = answer !== null;
+
+  function choose(index: number) {
+    if (answered) return;
+    setAnswer(index);
+    if (index === module.quiz.answerIndex && !completed) {
+      updateProgress({
+        ...progress,
+        completedWeeks: [...progress.completedWeeks, module.id],
+        quizScores: { ...progress.quizScores, [module.id]: 100 },
+        currentWeek: Math.max(progress.currentWeek, module.week + 1),
+        lastActivity: new Date().toISOString(),
+      });
+    }
+  }
+
+  return (
+    <View style={styles.weekCard}>
+      <TouchableOpacity style={styles.weekTop} onPress={() => setOpen(!open)} activeOpacity={0.8} accessibilityRole="button">
+        <View style={[styles.weekBadge, completed && { backgroundColor: theme.colors.brand }]}>
+          {completed ? <CheckCircle2 size={theme.icon(20)} color={theme.colors.onBrand} strokeWidth={2.6} /> : <Text style={styles.weekBadgeText}>{module.week}</Text>}
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.weekEyebrow}>
+            Week {module.week} · {module.minutes} min
+          </Text>
+          <Text style={styles.weekTitle}>{module.title}</Text>
+        </View>
+        <ChevronDown size={theme.icon(22)} color={theme.colors.muted} style={open ? styles.chevronOpen : undefined} />
+      </TouchableOpacity>
+
+      {open ? (
+        <View style={styles.weekBody}>
+          <Text style={styles.cardBody}>{module.lesson}</Text>
+          {module.keyPoints.map((point) => (
+            <View key={point} style={styles.bulletRow}>
+              <CheckCircle2 size={theme.icon(18)} color={theme.colors.brand} />
+              <Text style={styles.bulletText}>{point}</Text>
+            </View>
+          ))}
+          <View style={styles.exampleBox}>
+            <Text style={styles.scriptLabel}>Example · {module.example.channel}</Text>
+            <Text style={styles.scriptText}>{module.example.message}</Text>
+          </View>
+          <Text style={styles.cardBody}>{module.explanation}</Text>
+
+          <Text style={styles.nextTitle}>Quick question</Text>
+          <Text style={styles.quizPrompt}>{module.quiz.prompt}</Text>
+          {module.quiz.options.map((option, index) => {
+            const isCorrect = answered && index === module.quiz.answerIndex;
+            const isWrong = answered && index === answer && index !== module.quiz.answerIndex;
+            return (
+              <TouchableOpacity
+                key={option}
+                style={[styles.quizOption, isCorrect && styles.quizCorrect, isWrong && styles.quizWrong]}
+                onPress={() => choose(index)}
+                disabled={answered}
+                activeOpacity={0.8}
+              >
+                {isCorrect ? (
+                  <CheckCircle2 size={theme.icon(20)} color={theme.colors.low} />
+                ) : isWrong ? (
+                  <X size={theme.icon(20)} color={theme.colors.danger} />
+                ) : (
+                  <Circle size={theme.icon(20)} color={theme.colors.muted} />
+                )}
+                <Text style={styles.quizOptionText}>{option}</Text>
+              </TouchableOpacity>
+            );
+          })}
+          {answered ? (
+            <View style={[styles.quizFeedback, { borderColor: answer === module.quiz.answerIndex ? theme.colors.low : theme.colors.high }]}>
+              <Text style={[styles.quizFeedbackTitle, { color: answer === module.quiz.answerIndex ? theme.colors.low : theme.colors.high }]}>
+                {answer === module.quiz.answerIndex ? 'Correct!' : 'Not quite'}
+              </Text>
+              <Text style={styles.cardBody}>{module.quiz.whyCorrect}</Text>
+            </View>
+          ) : null}
+          <Text style={styles.rememberText}>{module.remember}</Text>
+        </View>
+      ) : null}
+    </View>
+  );
+}
 
 
-const styles = StyleSheet.create({
-  app: {
-    flex: 1,
-    backgroundColor: colors.bg,
-  },
+// ---------------------------------------------------------------------------
+// Themed styles
+// ---------------------------------------------------------------------------
 
-  // Header ------------------------------------------------------------------
-  header: {
-    paddingTop: Platform.OS === 'ios' ? 58 : 40,
-    paddingBottom: space.md,
-    paddingHorizontal: space.xl,
-    backgroundColor: colors.surface,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.line,
-  },
-  brandRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: space.md,
-  },
-  logoMark: {
-    width: 48,
-    height: 48,
-    borderRadius: radius.md,
-    backgroundColor: colors.brand,
-    alignItems: 'center',
-    justifyContent: 'center',
-    ...shadow.soft,
-  },
-  brandText: {
-    flex: 1,
-  },
-  brandName: {
-    fontSize: font.h2,
-    fontWeight: weight.bold,
-    color: colors.ink,
-    letterSpacing: -0.4,
-  },
-  brandTagline: {
-    fontSize: font.label,
-    color: colors.muted,
-    fontWeight: weight.medium,
-    marginTop: 1,
-  },
-  headerNavRow: {
-    gap: space.xs,
-  },
-  backButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    alignSelf: 'flex-start',
-    paddingVertical: 2,
-  },
-  backIcon: {
-    transform: [{ rotate: '180deg' }],
-    marginRight: 2,
-  },
-  backText: {
-    fontSize: font.bodySm,
-    fontWeight: weight.semibold,
-    color: colors.brand,
-  },
-  title: {
-    fontSize: font.h1,
-    fontWeight: weight.bold,
-    color: colors.ink,
-    letterSpacing: -0.5,
-  },
+function makeStyles(t: Theme) {
+  return StyleSheet.create({
+    app: { flex: 1, backgroundColor: t.colors.bg },
 
-  // Scroll body -------------------------------------------------------------
-  scroll: {
-    flex: 1,
-  },
-  scrollContent: {
-    padding: space.xl,
-    paddingBottom: 130,
-  },
-  screenTransition: {
-    flex: 1,
-  },
-  stack: {
-    gap: space.lg,
-  },
+    header: {
+      paddingTop: Platform.OS === 'ios' ? 58 : 44,
+      paddingBottom: t.space.md,
+      paddingHorizontal: t.space.xl,
+      backgroundColor: t.colors.surface,
+      borderBottomWidth: 1,
+      borderBottomColor: t.colors.line,
+    },
+    brandRow: { flexDirection: 'row', alignItems: 'center', gap: t.space.md },
+    logoMark: {
+      width: t.tap(48),
+      height: t.tap(48),
+      borderRadius: t.radius.md,
+      backgroundColor: t.colors.brand,
+      alignItems: 'center',
+      justifyContent: 'center',
+      ...t.shadow('soft'),
+    },
+    brandName: { fontSize: t.font('h2'), fontWeight: t.weight.bold, color: t.colors.ink, letterSpacing: -0.4 },
+    brandTagline: { fontSize: t.font('label'), color: t.colors.muted, fontWeight: t.weight.medium, marginTop: 1 },
+    headerNavRow: { gap: t.space.xs },
+    backButton: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', paddingVertical: 2 },
+    backIcon: { transform: [{ rotate: '180deg' }], marginRight: 2 },
+    backText: { fontSize: t.font('bodySm'), fontWeight: t.weight.semibold, color: t.colors.brand },
+    title: { fontSize: t.font('h1'), fontWeight: t.weight.bold, color: t.colors.ink, letterSpacing: -0.5 },
 
-  // Home hero ---------------------------------------------------------------
-  homeHero: {
-    gap: space.sm,
-    marginTop: space.xs,
-  },
-  homeHeroTitle: {
-    fontSize: font.display,
-    lineHeight: 39,
-    fontWeight: weight.bold,
-    color: colors.ink,
-    letterSpacing: -0.7,
-  },
-  homeHeroText: {
-    fontSize: font.body,
-    lineHeight: 27,
-    color: colors.inkSoft,
-    fontWeight: weight.regular,
-  },
+    scroll: { flex: 1 },
+    scrollContent: { padding: t.space.xl, paddingBottom: 140 },
+    screenTransition: { flex: 1 },
+    stack: { gap: t.space.lg },
 
-  // Step flow (Stop / Check / Call) -----------------------------------------
-  stepFlow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    backgroundColor: colors.surface,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    borderColor: colors.line,
-    paddingVertical: space.lg,
-    paddingHorizontal: space.sm,
-    ...shadow.soft,
-  },
-  stepFlowItem: {
-    flex: 1,
-    alignItems: 'center',
-    gap: 3,
-    paddingHorizontal: 2,
-  },
-  stepFlowBadge: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: colors.brandTint,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 3,
-  },
-  stepFlowBadgeText: {
-    fontSize: font.bodySm,
-    fontWeight: weight.bold,
-    color: colors.brand,
-  },
-  stepFlowTitle: {
-    fontSize: font.bodySm,
-    fontWeight: weight.bold,
-    color: colors.ink,
-  },
-  stepFlowDetail: {
-    fontSize: font.tiny,
-    color: colors.muted,
-    textAlign: 'center',
-    fontWeight: weight.medium,
-  },
-  stepFlowLine: {
-    width: 20,
-    height: 2,
-    backgroundColor: colors.lineStrong,
-    marginTop: 18,
-    borderRadius: 1,
-  },
+    homeHero: { gap: t.space.sm, marginTop: t.space.xs },
+    homeHeroTitle: { fontSize: t.font('display'), lineHeight: t.lineHeight('display'), fontWeight: t.weight.bold, color: t.colors.ink, letterSpacing: -0.7 },
+    homeHeroText: { fontSize: t.font('body'), lineHeight: t.lineHeight('body'), color: t.colors.inkSoft, fontWeight: t.weight.regular },
 
-  // Emergency button --------------------------------------------------------
-  emergencyButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: space.md,
-    backgroundColor: colors.danger,
-    borderRadius: radius.lg,
-    padding: space.lg,
-    ...shadow.card,
-  },
-  emergencyIcon: {
-    width: 54,
-    height: 54,
-    borderRadius: radius.md,
-    backgroundColor: 'rgba(255, 255, 255, 0.18)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  emergencyTextWrap: {
-    flex: 1,
-  },
-  emergencyTitle: {
-    fontSize: font.h3,
-    fontWeight: weight.bold,
-    color: colors.white,
-    letterSpacing: -0.3,
-  },
-  emergencySub: {
-    fontSize: font.bodySm,
-    color: 'rgba(255, 255, 255, 0.88)',
-    marginTop: 2,
-    fontWeight: weight.regular,
-  },
+    emergencyButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: t.space.md,
+      backgroundColor: t.colors.danger,
+      borderRadius: t.radius.lg,
+      padding: t.space.lg,
+      ...t.shadow('card'),
+    },
+    emergencyIcon: { width: t.tap(54), height: t.tap(54), borderRadius: t.radius.md, backgroundColor: 'rgba(255,255,255,0.18)', alignItems: 'center', justifyContent: 'center' },
+    emergencyTitle: { fontSize: t.font('h3'), fontWeight: t.weight.bold, color: t.colors.onBrand, letterSpacing: -0.3 },
+    emergencySub: { fontSize: t.font('bodySm'), color: 'rgba(255,255,255,0.9)', marginTop: 2, fontWeight: t.weight.regular },
 
-  // Section header ----------------------------------------------------------
-  sectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  sectionTitle: {
-    fontSize: font.h3,
-    fontWeight: weight.bold,
-    color: colors.ink,
-    letterSpacing: -0.3,
-  },
-  textLinkButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 1,
-    paddingVertical: 4,
-    paddingLeft: space.sm,
-  },
-  inlineLink: {
-    fontSize: font.bodySm,
-    fontWeight: weight.semibold,
-    color: colors.brand,
-  },
+    sectionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+    sectionTitle: { fontSize: t.font('h3'), fontWeight: t.weight.bold, color: t.colors.ink, letterSpacing: -0.3 },
+    textLinkButton: { flexDirection: 'row', alignItems: 'center', gap: 1, paddingVertical: 4, paddingLeft: t.space.sm },
+    inlineLink: { fontSize: t.font('bodySm'), fontWeight: t.weight.semibold, color: t.colors.brand },
 
-  // Tile grid ---------------------------------------------------------------
-  tileGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
-    rowGap: space.md,
-  },
-  tileWrap: {
-    width: '48%',
-  },
-  tile: {
-    width: '100%',
-    backgroundColor: colors.surface,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    borderColor: colors.line,
-    padding: space.lg,
-    gap: 6,
-    ...shadow.soft,
-  },
-  tileIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: radius.md,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 4,
-  },
-  tileTitle: {
-    fontSize: font.body,
-    fontWeight: weight.bold,
-    color: colors.ink,
-    letterSpacing: -0.2,
-  },
-  tileDetail: {
-    fontSize: font.label,
-    color: colors.muted,
-    fontWeight: weight.medium,
-  },
+    tileGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', rowGap: t.space.md },
+    tileWrap: { width: '48%' },
+    tile: {
+      width: '100%',
+      backgroundColor: t.colors.surface,
+      borderRadius: t.radius.lg,
+      borderWidth: 1,
+      borderColor: t.colors.line,
+      padding: t.space.lg,
+      gap: 6,
+      ...t.shadow('soft'),
+    },
+    tileIcon: { width: t.tap(52), height: t.tap(52), borderRadius: t.radius.md, alignItems: 'center', justifyContent: 'center', marginBottom: 4 },
+    tileTitle: { fontSize: t.font('body'), fontWeight: t.weight.bold, color: t.colors.ink, letterSpacing: -0.2 },
+    tileDetail: { fontSize: t.font('label'), color: t.colors.muted, fontWeight: t.weight.medium },
 
-  // Trusted contact ---------------------------------------------------------
-  contactStrip: {
-    backgroundColor: colors.surface,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    borderColor: colors.line,
-    padding: space.lg,
-    gap: space.md,
-    ...shadow.soft,
-  },
-  contactStripUrgent: {
-    borderColor: colors.dangerBorder,
-    backgroundColor: colors.dangerTint,
-  },
-  contactStripTitle: {
-    fontSize: font.h3,
-    fontWeight: weight.bold,
-    color: colors.ink,
-    letterSpacing: -0.3,
-  },
-  contactRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: space.md,
-  },
-  contactAvatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: colors.brandTint,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  contactInfo: {
-    flex: 1,
-  },
-  contactName: {
-    fontSize: font.bodySm,
-    fontWeight: weight.semibold,
-    color: colors.ink,
-  },
-  iconButton: {
-    width: 48,
-    height: 48,
-    borderRadius: radius.md,
-    backgroundColor: colors.brandTint,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  smallMuted: {
-    fontSize: font.label,
-    color: colors.muted,
-    fontWeight: weight.regular,
-    lineHeight: 20,
-  },
+    screenIntro: { fontSize: t.font('body'), lineHeight: t.lineHeight('body'), color: t.colors.inkSoft, fontWeight: t.weight.medium },
+    screenIntroNarrow: { flex: 1, fontSize: t.font('bodySm'), lineHeight: t.lineHeight('bodySm'), color: t.colors.muted, fontWeight: t.weight.medium, paddingRight: t.space.md },
 
-  // Generic card ------------------------------------------------------------
-  card: {
-    backgroundColor: colors.surface,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    borderColor: colors.line,
-    padding: space.lg,
-    gap: space.md,
-    ...shadow.soft,
-  },
-  cardTitle: {
-    fontSize: font.h3,
-    fontWeight: weight.bold,
-    color: colors.ink,
-    letterSpacing: -0.3,
-  },
-  cardBody: {
-    fontSize: font.bodySm,
-    lineHeight: 24,
-    color: colors.inkSoft,
-    fontWeight: weight.regular,
-  },
+    toolSection: { gap: t.space.md },
+    toolSectionTitle: { fontSize: t.font('h3'), fontWeight: t.weight.bold, color: t.colors.ink, letterSpacing: -0.3 },
+    toolIcon: { width: t.tap(46), height: t.tap(46), borderRadius: t.radius.sm, backgroundColor: t.colors.brandTint, alignItems: 'center', justifyContent: 'center' },
 
-  // Screen intros -----------------------------------------------------------
-  screenIntro: {
-    fontSize: font.body,
-    lineHeight: 26,
-    color: colors.inkSoft,
-    fontWeight: weight.medium,
-  },
-  screenIntroNarrow: {
-    flex: 1,
-    fontSize: font.bodySm,
-    lineHeight: 23,
-    color: colors.muted,
-    fontWeight: weight.medium,
-    paddingRight: space.md,
-  },
 
-  // Tools sections ----------------------------------------------------------
-  toolSection: {
-    gap: space.md,
-  },
-  toolSectionTitle: {
-    fontSize: font.h3,
-    fontWeight: weight.bold,
-    color: colors.ink,
-    letterSpacing: -0.3,
-  },
-  toolIcon: {
-    width: 46,
-    height: 46,
-    borderRadius: radius.sm,
-    backgroundColor: colors.brandTint,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+    input: {
+      backgroundColor: t.colors.surface,
+      borderRadius: t.radius.md,
+      borderWidth: 1.5,
+      borderColor: t.colors.lineStrong,
+      paddingHorizontal: t.space.lg,
+      paddingVertical: 15,
+      fontSize: t.font('body'),
+      color: t.colors.ink,
+      minHeight: t.tap(54),
+    },
+    textArea: {
+      backgroundColor: t.colors.surface,
+      borderRadius: t.radius.md,
+      borderWidth: 1.5,
+      borderColor: t.colors.lineStrong,
+      padding: t.space.lg,
+      fontSize: t.font('body'),
+      lineHeight: t.lineHeight('body'),
+      color: t.colors.ink,
+      minHeight: t.tap(140),
+    },
+    textAreaSmall: {
+      backgroundColor: t.colors.surface,
+      borderRadius: t.radius.md,
+      borderWidth: 1.5,
+      borderColor: t.colors.lineStrong,
+      padding: t.space.lg,
+      fontSize: t.font('bodySm'),
+      lineHeight: t.lineHeight('bodySm'),
+      color: t.colors.ink,
+      minHeight: t.tap(92),
+    },
 
-  // Inputs ------------------------------------------------------------------
-  input: {
-    backgroundColor: colors.surface,
-    borderRadius: radius.md,
-    borderWidth: 1.5,
-    borderColor: colors.lineStrong,
-    paddingHorizontal: space.lg,
-    paddingVertical: 15,
-    fontSize: font.body,
-    color: colors.ink,
-  },
-  textArea: {
-    backgroundColor: colors.surface,
-    borderRadius: radius.md,
-    borderWidth: 1.5,
-    borderColor: colors.lineStrong,
-    padding: space.lg,
-    fontSize: font.body,
-    lineHeight: 26,
-    color: colors.ink,
-    minHeight: 140,
-  },
-  textAreaSmall: {
-    backgroundColor: colors.surface,
-    borderRadius: radius.md,
-    borderWidth: 1.5,
-    borderColor: colors.lineStrong,
-    padding: space.lg,
-    fontSize: font.bodySm,
-    lineHeight: 24,
-    color: colors.ink,
-    minHeight: 92,
-  },
+    buttonRow: { flexDirection: 'row', gap: t.space.sm },
+    secondaryButtonWide: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: t.space.sm,
+      backgroundColor: t.colors.brandTint,
+      borderRadius: t.radius.md,
+      paddingVertical: 16,
+      paddingHorizontal: t.space.lg,
+      minHeight: t.tap(52),
+    },
+    secondaryButtonWideText: { fontSize: t.font('bodySm'), fontWeight: t.weight.semibold, color: t.colors.brand },
+    disabledButton: { backgroundColor: t.colors.bgWarm, borderColor: t.colors.line, shadowOpacity: 0, elevation: 0 },
+    disabledText: { color: t.colors.faint },
+    secondaryAction: {
+      flex: 1,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 6,
+      backgroundColor: t.colors.surface,
+      borderWidth: 1,
+      borderColor: t.colors.line,
+      borderRadius: t.radius.pill,
+      paddingVertical: 12,
+      paddingHorizontal: t.space.md,
+      minHeight: t.tap(48),
+    },
+    secondaryActionText: { fontSize: t.font('label'), fontWeight: t.weight.semibold, color: t.colors.brand },
 
-  // Buttons -----------------------------------------------------------------
-  primaryButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: space.sm,
-    backgroundColor: colors.brand,
-    borderRadius: radius.md,
-    paddingVertical: 17,
-    paddingHorizontal: space.xl,
-    ...shadow.soft,
-  },
-  primaryButtonText: {
-    fontSize: font.body,
-    fontWeight: weight.bold,
-    color: colors.white,
-    letterSpacing: -0.2,
-  },
-  disabledButton: {
-    backgroundColor: colors.bgWarm,
-    borderColor: colors.line,
-    shadowOpacity: 0,
-    elevation: 0,
-  },
-  disabledText: {
-    color: colors.faint,
-  },
-  buttonRow: {
-    flexDirection: 'row',
-    gap: space.sm,
-  },
-  secondaryButtonWide: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: space.sm,
-    backgroundColor: colors.brandTint,
-    borderRadius: radius.md,
-    paddingVertical: 16,
-    paddingHorizontal: space.lg,
-  },
-  secondaryButtonWideText: {
-    fontSize: font.bodySm,
-    fontWeight: weight.semibold,
-    color: colors.brand,
-  },
-  secondaryAction: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.line,
-    borderRadius: radius.pill,
-    paddingVertical: 12,
-    paddingHorizontal: space.md,
-  },
-  secondaryActionText: {
-    fontSize: font.label,
-    fontWeight: weight.semibold,
-    color: colors.brand,
-  },
+    attachment: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: t.space.md,
+      backgroundColor: t.colors.surface,
+      borderRadius: t.radius.md,
+      borderWidth: 1,
+      borderColor: t.colors.line,
+      padding: t.space.md,
+    },
+    attachmentImage: { width: 54, height: 54, borderRadius: t.radius.sm, backgroundColor: t.colors.bgWarm },
+    attachmentTitle: { fontSize: t.font('bodySm'), fontWeight: t.weight.semibold, color: t.colors.ink },
 
-  // Risk / AI panels --------------------------------------------------------
-  riskPanel: {
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    padding: space.lg,
-    gap: space.md,
-    ...shadow.soft,
-  },
-  aiPanel: {
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    padding: space.lg,
-    gap: space.md,
-    ...shadow.soft,
-  },
-  riskTop: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: space.md,
-  },
-  riskTextColumn: {
-    flex: 1,
-    gap: 3,
-  },
-  riskLabel: {
-    fontSize: font.tiny,
-    fontWeight: weight.bold,
-    letterSpacing: 1.1,
-    textTransform: 'uppercase',
-  },
-  riskHeadline: {
-    fontSize: font.h3,
-    fontWeight: weight.bold,
-    color: colors.ink,
-    letterSpacing: -0.3,
-  },
-  scoreBadge: {
-    minWidth: 56,
-    height: 56,
-    borderRadius: radius.md,
-    borderWidth: 2,
-    backgroundColor: colors.surface,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 8,
-  },
-  scoreText: {
-    fontSize: font.h2,
-    fontWeight: weight.bold,
-  },
-  findings: {
-    gap: space.sm,
-  },
-  findingRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: space.sm,
-  },
-  findingText: {
-    flex: 1,
-    gap: 1,
-  },
-  findingTitle: {
-    fontSize: font.bodySm,
-    fontWeight: weight.semibold,
-    color: colors.ink,
-  },
-  findingDetail: {
-    fontSize: font.label,
-    lineHeight: 21,
-    color: colors.inkSoft,
-  },
-  nextTitle: {
-    fontSize: font.label,
-    fontWeight: weight.bold,
-    color: colors.ink,
-    textTransform: 'uppercase',
-    letterSpacing: 0.8,
-    marginTop: 2,
-  },
-  bulletRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: space.sm,
-  },
-  bulletText: {
-    flex: 1,
-    fontSize: font.bodySm,
-    lineHeight: 24,
-    color: colors.inkSoft,
-  },
+    aiActionBox: { gap: t.space.sm },
+    errorText: { fontSize: t.font('label'), color: t.colors.danger, fontWeight: t.weight.medium, lineHeight: t.lineHeight('label') },
+    smallMuted: { fontSize: t.font('label'), color: t.colors.muted, fontWeight: t.weight.regular, lineHeight: t.lineHeight('label') },
 
-  // Script / extracted text -------------------------------------------------
-  scriptBox: {
-    backgroundColor: colors.surfaceMuted,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.line,
-    padding: space.md,
-    gap: 4,
-  },
-  scriptLabel: {
-    fontSize: font.tiny,
-    fontWeight: weight.bold,
-    color: colors.muted,
-    textTransform: 'uppercase',
-    letterSpacing: 0.8,
-  },
-  scriptText: {
-    fontSize: font.bodySm,
-    lineHeight: 24,
-    color: colors.ink,
-    fontWeight: weight.medium,
-  },
+    cardTitle: { fontSize: t.font('h3'), fontWeight: t.weight.bold, color: t.colors.ink, letterSpacing: -0.3 },
+    cardBody: { fontSize: t.font('bodySm'), lineHeight: t.lineHeight('bodySm'), color: t.colors.inkSoft, fontWeight: t.weight.regular },
 
-  // AI helper boxes ---------------------------------------------------------
-  aiActionBox: {
-    gap: space.sm,
-  },
-  errorText: {
-    fontSize: font.label,
-    color: colors.danger,
-    fontWeight: weight.medium,
-    lineHeight: 20,
-  },
+    scriptBox: { backgroundColor: t.colors.surfaceMuted, borderRadius: t.radius.md, borderWidth: 1, borderColor: t.colors.line, padding: t.space.md, gap: 4 },
+    scriptLabel: { fontSize: t.font('tiny'), fontWeight: t.weight.bold, color: t.colors.muted, textTransform: 'uppercase', letterSpacing: 0.8 },
+    scriptText: { fontSize: t.font('bodySm'), lineHeight: t.lineHeight('bodySm'), color: t.colors.ink, fontWeight: t.weight.medium },
 
-  // Attachments -------------------------------------------------------------
-  attachment: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: space.md,
-    backgroundColor: colors.surface,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.line,
-    padding: space.md,
-  },
-  attachmentImage: {
-    width: 54,
-    height: 54,
-    borderRadius: radius.sm,
-    backgroundColor: colors.bgWarm,
-  },
-  attachmentText: {
-    flex: 1,
-    gap: 1,
-  },
-  attachmentTitle: {
-    fontSize: font.bodySm,
-    fontWeight: weight.semibold,
-    color: colors.ink,
-  },
 
-  // Toggle rows -------------------------------------------------------------
-  toggleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: space.md,
-    backgroundColor: colors.surface,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.line,
-    paddingVertical: 14,
-    paddingHorizontal: space.lg,
-  },
-  toggleLabel: {
-    flex: 1,
-    fontSize: font.bodySm,
-    fontWeight: weight.medium,
-    color: colors.ink,
-    lineHeight: 22,
-  },
+    riskPanel: { borderRadius: t.radius.lg, borderWidth: 1, padding: t.space.lg, gap: t.space.md, ...t.shadow('soft') },
+    riskTop: { flexDirection: 'row', alignItems: 'center', gap: t.space.md },
+    riskTextColumn: { flex: 1, gap: 3 },
+    riskLabel: { fontSize: t.font('tiny'), fontWeight: t.weight.bold, letterSpacing: 1.1, textTransform: 'uppercase' },
+    riskHeadline: { fontSize: t.font('h3'), fontWeight: t.weight.bold, color: t.colors.ink, letterSpacing: -0.3 },
+    scoreBadge: { minWidth: t.tap(56), height: t.tap(56), borderRadius: t.radius.md, borderWidth: 2, backgroundColor: t.colors.surface, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 8 },
+    scoreText: { fontSize: t.font('h2'), fontWeight: t.weight.bold },
+    findings: { gap: t.space.sm },
+    findingRow: { flexDirection: 'row', alignItems: 'flex-start', gap: t.space.sm },
+    findingText: { flex: 1, gap: 1 },
+    findingTitle: { fontSize: t.font('bodySm'), fontWeight: t.weight.semibold, color: t.colors.ink },
+    findingDetail: { fontSize: t.font('label'), lineHeight: t.lineHeight('label'), color: t.colors.inkSoft },
+    nextTitle: { fontSize: t.font('label'), fontWeight: t.weight.bold, color: t.colors.ink, textTransform: 'uppercase', letterSpacing: 0.8, marginTop: 2 },
+    bulletRow: { flexDirection: 'row', alignItems: 'flex-start', gap: t.space.sm },
+    bulletText: { flex: 1, fontSize: t.font('bodySm'), lineHeight: t.lineHeight('bodySm'), color: t.colors.inkSoft },
 
-  // Emergency modal + stop panel --------------------------------------------
-  stopPanel: {
-    alignItems: 'center',
-    gap: space.sm,
-    backgroundColor: colors.dangerTint,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    borderColor: colors.dangerBorder,
-    padding: space.xl,
-  },
-  stopTitle: {
-    fontSize: font.h1,
-    fontWeight: weight.bold,
-    color: colors.danger,
-    letterSpacing: -0.4,
-    textAlign: 'center',
-  },
-  stopText: {
-    fontSize: font.body,
-    lineHeight: 26,
-    color: colors.inkSoft,
-    textAlign: 'center',
-    fontWeight: weight.medium,
-  },
-  stepRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: space.md,
-    backgroundColor: colors.surface,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.line,
-    padding: space.md,
-    ...shadow.soft,
-  },
-  stepNumber: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: colors.brand,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  stepNumberText: {
-    fontSize: font.bodySm,
-    fontWeight: weight.bold,
-    color: colors.white,
-  },
-  stepText: {
-    flex: 1,
-    fontSize: font.bodySm,
-    lineHeight: 24,
-    color: colors.ink,
-    fontWeight: weight.medium,
-  },
+    toggleRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: t.space.md,
+      backgroundColor: t.colors.surface,
+      borderRadius: t.radius.md,
+      borderWidth: 1,
+      borderColor: t.colors.line,
+      paddingVertical: 14,
+      paddingHorizontal: t.space.lg,
+      minHeight: t.tap(58),
+    },
+    toggleLabel: { flex: 1, fontSize: t.font('bodySm'), fontWeight: t.weight.medium, color: t.colors.ink, lineHeight: t.lineHeight('bodySm') },
 
-  // News --------------------------------------------------------------------
-  refreshButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: colors.brandTint,
-    borderRadius: radius.pill,
-    paddingVertical: 8,
-    paddingHorizontal: space.md,
-  },
-  refreshText: {
-    fontSize: font.label,
-    fontWeight: weight.semibold,
-    color: colors.brand,
-  },
-  newsItem: {
-    backgroundColor: colors.surface,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    borderColor: colors.line,
-    padding: space.lg,
-    gap: 6,
-    ...shadow.soft,
-  },
-  newsTop: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  newsSource: {
-    fontSize: font.tiny,
-    fontWeight: weight.bold,
-    color: colors.brand,
-    textTransform: 'uppercase',
-    letterSpacing: 0.8,
-  },
-  newsDate: {
-    fontSize: font.tiny,
-    color: colors.faint,
-    fontWeight: weight.medium,
-  },
-  newsTitle: {
-    fontSize: font.h3,
-    fontWeight: weight.bold,
-    color: colors.ink,
-    lineHeight: 25,
-    letterSpacing: -0.3,
-  },
+    stopPanel: { alignItems: 'center', gap: t.space.sm, backgroundColor: t.colors.dangerTint, borderRadius: t.radius.lg, borderWidth: 1, borderColor: t.colors.dangerBorder, padding: t.space.xl },
+    stopTitle: { fontSize: t.font('h1'), fontWeight: t.weight.bold, color: t.colors.danger, letterSpacing: -0.4, textAlign: 'center' },
+    stopText: { fontSize: t.font('body'), lineHeight: t.lineHeight('body'), color: t.colors.inkSoft, textAlign: 'center', fontWeight: t.weight.medium },
+    stepRow: { flexDirection: 'row', alignItems: 'center', gap: t.space.md, backgroundColor: t.colors.surface, borderRadius: t.radius.md, borderWidth: 1, borderColor: t.colors.line, padding: t.space.md, ...t.shadow('soft') },
+    stepNumber: { width: t.tap(38), height: t.tap(38), borderRadius: 19, backgroundColor: t.colors.brand, alignItems: 'center', justifyContent: 'center' },
+    stepNumberText: { fontSize: t.font('bodySm'), fontWeight: t.weight.bold, color: t.colors.onBrand },
+    stepText: { flex: 1, fontSize: t.font('bodySm'), lineHeight: t.lineHeight('bodySm'), color: t.colors.ink, fontWeight: t.weight.medium },
 
-  // Learn -------------------------------------------------------------------
-  lessonItem: {
-    backgroundColor: colors.surface,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    borderColor: colors.line,
-    padding: space.lg,
-    gap: space.sm,
-    ...shadow.soft,
-  },
-  lessonHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: space.md,
-  },
-  lessonTitle: {
-    fontSize: font.h3,
-    fontWeight: weight.bold,
-    color: colors.ink,
-    letterSpacing: -0.3,
-  },
-  lessonBody: {
-    gap: space.sm,
-    marginTop: space.xs,
-    paddingTop: space.md,
-    borderTopWidth: 1,
-    borderTopColor: colors.line,
-  },
-  rememberText: {
-    fontSize: font.bodySm,
-    lineHeight: 24,
-    color: colors.accent,
-    fontWeight: weight.semibold,
-    backgroundColor: colors.accentTint,
-    borderRadius: radius.sm,
-    padding: space.md,
-    marginTop: space.xs,
-  },
+    refreshButton: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: t.colors.brandTint, borderRadius: t.radius.pill, paddingVertical: 8, paddingHorizontal: t.space.md },
+    refreshText: { fontSize: t.font('label'), fontWeight: t.weight.semibold, color: t.colors.brand },
+    newsItem: { backgroundColor: t.colors.surface, borderRadius: t.radius.lg, borderWidth: 1, borderColor: t.colors.line, padding: t.space.lg, gap: 6, ...t.shadow('soft') },
+    newsTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+    newsSource: { fontSize: t.font('tiny'), fontWeight: t.weight.bold, color: t.colors.brand, textTransform: 'uppercase', letterSpacing: 0.8 },
+    newsDate: { fontSize: t.font('tiny'), color: t.colors.faint, fontWeight: t.weight.medium },
+    newsTitle: { fontSize: t.font('h3'), fontWeight: t.weight.bold, color: t.colors.ink, lineHeight: t.lineHeight('h3'), letterSpacing: -0.3 },
 
-  // Practice / quiz ---------------------------------------------------------
-  confidencePanel: {
-    backgroundColor: colors.brand,
-    borderRadius: radius.lg,
-    padding: space.lg,
-    gap: space.sm,
-    ...shadow.card,
-  },
-  metricTopRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  metricLabel: {
-    fontSize: font.label,
-    fontWeight: weight.semibold,
-    color: 'rgba(255, 255, 255, 0.92)',
-  },
-  metricSmall: {
-    fontSize: font.label,
-    color: 'rgba(255, 255, 255, 0.78)',
-    fontWeight: weight.medium,
-  },
-  metricValue: {
-    fontSize: 40,
-    fontWeight: weight.bold,
-    color: colors.white,
-    letterSpacing: -1,
-  },
-  practiceCard: {
-    backgroundColor: colors.surface,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    borderColor: colors.line,
-    padding: space.lg,
-    gap: space.sm,
-    ...shadow.soft,
-  },
-  practiceText: {
-    fontSize: font.body,
-    lineHeight: 27,
-    color: colors.ink,
-    fontWeight: weight.medium,
-  },
-  optionGrid: {
-    flexDirection: 'row',
-    gap: space.sm,
-  },
-  answerButton: {
-    flex: 1,
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: colors.surface,
-    borderRadius: radius.md,
-    borderWidth: 1.5,
-    borderColor: colors.line,
-    paddingVertical: space.md,
-    paddingHorizontal: space.sm,
-  },
-  answerSelected: {
-    borderColor: colors.info,
-    backgroundColor: colors.infoTint,
-  },
-  answerCorrect: {
-    borderColor: colors.low,
-    backgroundColor: colors.lowTint,
-  },
-  answerWrong: {
-    borderColor: colors.danger,
-    backgroundColor: colors.dangerTint,
-  },
-  answerText: {
-    fontSize: font.bodySm,
-    fontWeight: weight.semibold,
-    color: colors.ink,
-  },
-  feedbackPanel: {
-    backgroundColor: colors.surface,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    borderColor: colors.line,
-    padding: space.lg,
-    gap: space.md,
-    ...shadow.soft,
-  },
-  feedbackTitle: {
-    fontSize: font.h3,
-    fontWeight: weight.bold,
-    color: colors.low,
-    letterSpacing: -0.3,
-  },
-  feedbackWrong: {
-    color: colors.high,
-  },
+    confidencePanel: { backgroundColor: t.colors.brand, borderRadius: t.radius.lg, padding: t.space.lg, gap: t.space.sm, ...t.shadow('card') },
+    metricTopRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+    metricLabel: { fontSize: t.font('label'), fontWeight: t.weight.semibold, color: 'rgba(255,255,255,0.92)' },
+    metricSmall: { fontSize: t.font('label'), color: 'rgba(255,255,255,0.78)', fontWeight: t.weight.medium },
+    metricValue: { fontSize: Math.round(t.font('display') * 1.25), fontWeight: t.weight.bold, color: t.colors.white, letterSpacing: -1 },
+    practiceCard: { backgroundColor: t.colors.surface, borderRadius: t.radius.lg, borderWidth: 1, borderColor: t.colors.line, padding: t.space.lg, gap: t.space.sm, ...t.shadow('soft') },
+    practiceText: { fontSize: t.font('body'), lineHeight: t.lineHeight('body'), color: t.colors.ink, fontWeight: t.weight.medium },
+    optionGrid: { flexDirection: 'row', gap: t.space.sm },
+    answerButton: { flex: 1, alignItems: 'center', gap: 6, backgroundColor: t.colors.surface, borderRadius: t.radius.md, borderWidth: 1.5, borderColor: t.colors.line, paddingVertical: t.space.md, paddingHorizontal: t.space.sm, minHeight: t.tap(72) },
+    answerSelected: { borderColor: t.colors.info, backgroundColor: t.colors.infoTint },
+    answerCorrect: { borderColor: t.colors.low, backgroundColor: t.colors.lowTint },
+    answerWrong: { borderColor: t.colors.danger, backgroundColor: t.colors.dangerTint },
+    answerText: { fontSize: t.font('bodySm'), fontWeight: t.weight.semibold, color: t.colors.ink },
+    feedbackPanel: { backgroundColor: t.colors.surface, borderRadius: t.radius.lg, borderWidth: 1, borderColor: t.colors.line, padding: t.space.lg, gap: t.space.md, ...t.shadow('soft') },
+    feedbackTitle: { fontSize: t.font('h3'), fontWeight: t.weight.bold, color: t.colors.low, letterSpacing: -0.3 },
+    feedbackWrong: { color: t.colors.high },
 
-  // Progress bar ------------------------------------------------------------
-  progressTrack: {
-    height: 10,
-    borderRadius: radius.pill,
-    backgroundColor: 'rgba(255, 255, 255, 0.28)',
-    overflow: 'hidden',
-  },
-  progressFill: {
-    height: '100%',
-    borderRadius: radius.pill,
-    backgroundColor: colors.white,
-  },
+    progressTrack: { height: 10, borderRadius: t.radius.pill, backgroundColor: 'rgba(255,255,255,0.28)', overflow: 'hidden' },
+    progressFill: { height: '100%', borderRadius: t.radius.pill, backgroundColor: t.colors.white },
 
-  // Bottom navigation -------------------------------------------------------
-  bottomNav: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-around',
-    backgroundColor: colors.surface,
-    borderTopWidth: 1,
-    borderTopColor: colors.line,
-    paddingTop: space.sm,
-    paddingBottom: Platform.OS === 'ios' ? 28 : space.md,
-    paddingHorizontal: space.sm,
-  },
-  navItem: {
-    flex: 1,
-    alignItems: 'center',
-    gap: 4,
-  },
-  navIconWrap: {
-    width: 52,
-    height: 34,
-    borderRadius: radius.pill,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  navIconWrapActive: {
-    backgroundColor: colors.brandTint,
-  },
-  navLabel: {
-    fontSize: font.tiny,
-    fontWeight: weight.medium,
-    color: colors.muted,
-  },
-  navLabelActive: {
-    color: colors.brand,
-    fontWeight: weight.bold,
-  },
 
-  // Emergency modal ---------------------------------------------------------
-  modalScreen: {
-    flex: 1,
-    backgroundColor: colors.bg,
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingTop: Platform.OS === 'ios' ? 58 : 40,
-    paddingBottom: space.md,
-    paddingHorizontal: space.xl,
-    backgroundColor: colors.surface,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.line,
-  },
-  modalTitle: {
-    fontSize: font.h2,
-    fontWeight: weight.bold,
-    color: colors.ink,
-    letterSpacing: -0.4,
-  },
-  closeButton: {
-    width: 44,
-    height: 44,
-    borderRadius: radius.md,
-    backgroundColor: colors.surfaceMuted,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  modalContent: {
-    padding: space.xl,
-    paddingBottom: 60,
-  },
+    bottomNav: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      justifyContent: 'space-around',
+      backgroundColor: t.colors.surface,
+      borderTopWidth: 1,
+      borderTopColor: t.colors.line,
+      paddingTop: t.space.sm,
+      paddingBottom: Platform.OS === 'ios' ? 28 : t.space.md,
+      paddingHorizontal: t.space.sm,
+    },
+    navItem: { flex: 1, alignItems: 'center', gap: 4 },
+    navIconWrap: { width: t.tap(54), height: t.tap(34), borderRadius: t.radius.pill, alignItems: 'center', justifyContent: 'center' },
+    navIconWrapActive: { backgroundColor: t.colors.brandTint },
+    navBadge: {
+      position: 'absolute',
+      top: -2,
+      right: 8,
+      minWidth: 18,
+      height: 18,
+      borderRadius: 9,
+      paddingHorizontal: 4,
+      backgroundColor: t.colors.danger,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderWidth: 1.5,
+      borderColor: t.colors.surface,
+    },
+    navBadgeText: { fontSize: 10, fontWeight: t.weight.bold, color: t.colors.white },
+    navLabel: { fontSize: t.font('tiny'), fontWeight: t.weight.medium, color: t.colors.muted },
+    navLabelActive: { color: t.colors.brand, fontWeight: t.weight.bold },
 
-  // QR camera ---------------------------------------------------------------
-  cameraFrame: {
-    borderRadius: radius.lg,
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: colors.line,
-    backgroundColor: colors.ink,
-    ...shadow.card,
-  },
-  cameraView: {
-    width: '100%',
-    height: 280,
-  },
-  cameraHint: {
-    fontSize: font.bodySm,
-    fontWeight: weight.semibold,
-    color: colors.white,
-    textAlign: 'center',
-    paddingVertical: space.md,
-    backgroundColor: 'rgba(0, 0, 0, 0.55)',
-  },
-});
+    modalScreen: { flex: 1, backgroundColor: t.colors.bg },
+    modalHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingTop: Platform.OS === 'ios' ? 58 : 44,
+      paddingBottom: t.space.md,
+      paddingHorizontal: t.space.xl,
+      backgroundColor: t.colors.surface,
+      borderBottomWidth: 1,
+      borderBottomColor: t.colors.line,
+    },
+    modalTitle: { fontSize: t.font('h2'), fontWeight: t.weight.bold, color: t.colors.ink, letterSpacing: -0.4 },
+    closeButton: { width: t.tap(44), height: t.tap(44), borderRadius: t.radius.md, backgroundColor: t.colors.surfaceMuted, alignItems: 'center', justifyContent: 'center' },
+    modalContent: { padding: t.space.xl, paddingBottom: 60 },
+
+    cameraFrame: { borderRadius: t.radius.lg, overflow: 'hidden', borderWidth: 1, borderColor: t.colors.line, backgroundColor: '#000000', ...t.shadow('card') },
+    cameraView: { width: '100%', height: 280 },
+    cameraHint: { fontSize: t.font('bodySm'), fontWeight: t.weight.semibold, color: t.colors.white, textAlign: 'center', paddingVertical: t.space.md, backgroundColor: 'rgba(0,0,0,0.55)' },
+
+    contactStrip: { backgroundColor: t.colors.surface, borderRadius: t.radius.lg, borderWidth: 1, borderColor: t.colors.line, padding: t.space.lg, gap: t.space.md, ...t.shadow('soft') },
+    contactStripUrgent: { borderColor: t.colors.dangerBorder, backgroundColor: t.colors.dangerTint },
+    contactStripTitle: { fontSize: t.font('h3'), fontWeight: t.weight.bold, color: t.colors.ink, letterSpacing: -0.3 },
+    contactRow: { flexDirection: 'row', alignItems: 'center', gap: t.space.md },
+    contactAvatar: { width: t.tap(48), height: t.tap(48), borderRadius: 24, backgroundColor: t.colors.brandTint, alignItems: 'center', justifyContent: 'center' },
+    contactName: { fontSize: t.font('bodySm'), fontWeight: t.weight.semibold, color: t.colors.ink },
+    iconButton: { width: t.tap(48), height: t.tap(48), borderRadius: t.radius.md, backgroundColor: t.colors.brandTint, alignItems: 'center', justifyContent: 'center' },
+
+    emptyState: { alignItems: 'center', gap: t.space.md, paddingVertical: t.space.xxxl, paddingHorizontal: t.space.lg },
+    emptyIcon: { width: t.tap(72), height: t.tap(72), borderRadius: t.radius.lg, backgroundColor: t.colors.brandTint, alignItems: 'center', justifyContent: 'center' },
+
+    activityRow: { flexDirection: 'row', alignItems: 'center', gap: t.space.md, backgroundColor: t.colors.surface, borderRadius: t.radius.md, borderWidth: 1, borderColor: t.colors.line, padding: t.space.md, ...t.shadow('soft') },
+    activityIcon: { width: t.tap(46), height: t.tap(46), borderRadius: t.radius.sm, alignItems: 'center', justifyContent: 'center' },
+    activityTitle: { fontSize: t.font('bodySm'), fontWeight: t.weight.semibold, color: t.colors.ink },
+    activityDetail: { fontSize: t.font('label'), color: t.colors.inkSoft, lineHeight: t.lineHeight('label'), marginTop: 2 },
+    activityMeta: { fontSize: t.font('tiny'), color: t.colors.muted, marginTop: 3, fontWeight: t.weight.medium },
+    unreadDot: { width: 10, height: 10, borderRadius: 5 },
+
+    weekCard: { backgroundColor: t.colors.surface, borderRadius: t.radius.lg, borderWidth: 1, borderColor: t.colors.line, padding: t.space.lg, gap: t.space.md, ...t.shadow('soft') },
+    weekTop: { flexDirection: 'row', alignItems: 'center', gap: t.space.md },
+    weekBadge: { width: t.tap(44), height: t.tap(44), borderRadius: t.radius.sm, backgroundColor: t.colors.brandTint, alignItems: 'center', justifyContent: 'center' },
+    weekBadgeText: { fontSize: t.font('body'), fontWeight: t.weight.bold, color: t.colors.brand },
+    weekEyebrow: { fontSize: t.font('tiny'), fontWeight: t.weight.bold, color: t.colors.muted, textTransform: 'uppercase', letterSpacing: 0.6 },
+    weekTitle: { fontSize: t.font('h3'), fontWeight: t.weight.bold, color: t.colors.ink, letterSpacing: -0.3, marginTop: 1 },
+    chevronOpen: { transform: [{ rotate: '180deg' }] },
+    weekBody: { gap: t.space.md, paddingTop: t.space.md, borderTopWidth: 1, borderTopColor: t.colors.line },
+    exampleBox: { backgroundColor: t.colors.surfaceMuted, borderRadius: t.radius.md, borderWidth: 1, borderColor: t.colors.line, padding: t.space.md, gap: 4 },
+    quizPrompt: { fontSize: t.font('bodySm'), fontWeight: t.weight.semibold, color: t.colors.ink, lineHeight: t.lineHeight('bodySm') },
+    quizOption: { flexDirection: 'row', alignItems: 'center', gap: t.space.sm, backgroundColor: t.colors.surface, borderRadius: t.radius.md, borderWidth: 1.5, borderColor: t.colors.line, padding: t.space.md, minHeight: t.tap(52) },
+    quizCorrect: { borderColor: t.colors.low, backgroundColor: t.colors.lowTint },
+    quizWrong: { borderColor: t.colors.danger, backgroundColor: t.colors.dangerTint },
+    quizOptionText: { flex: 1, fontSize: t.font('bodySm'), fontWeight: t.weight.medium, color: t.colors.ink, lineHeight: t.lineHeight('bodySm') },
+    quizFeedback: { borderRadius: t.radius.md, borderWidth: 1.5, padding: t.space.md, gap: 4 },
+    quizFeedbackTitle: { fontSize: t.font('bodySm'), fontWeight: t.weight.bold },
+    rememberText: {
+      fontSize: t.font('bodySm'),
+      lineHeight: t.lineHeight('bodySm'),
+      color: t.colors.accent,
+      fontWeight: t.weight.semibold,
+      backgroundColor: t.colors.accentTint,
+      borderRadius: t.radius.sm,
+      padding: t.space.md,
+    },
+  });
+}
