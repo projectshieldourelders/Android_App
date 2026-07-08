@@ -16,7 +16,6 @@ import {
   ExternalLink,
   FileAudio,
   GraduationCap,
-  Home,
   ChevronLeft,
   LayoutGrid,
   LifeBuoy,
@@ -34,11 +33,19 @@ import {
   ShieldAlert,
   ShieldCheck,
   Siren,
-  Sparkles,
   Trophy,
   Upload,
   Users,
   X,
+  House,
+  Info,
+  Menu,
+  Puzzle,
+  PhoneOff,
+  Ban,
+  KeyRound,
+  MonitorOff,
+  Shuffle,
 } from 'lucide-react-native';
 import type { LucideIcon } from 'lucide-react-native';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -55,7 +62,6 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
-  Switch,
   Text,
   TextInput,
   TouchableOpacity,
@@ -63,8 +69,8 @@ import {
 } from 'react-native';
 import type { DimensionValue, ImageStyle } from 'react-native';
 
-import { emergencySteps, practiceExamples, recoverySteps, trustedContactMessage } from './src/data/content';
-import { daysUntilUnlock, isWeekUnlocked, modulesForDifficulty, weeklyModules } from './src/data/curriculum';
+import { practiceExamples, recoverySteps, trustedContactMessage } from './src/data/content';
+import { daysUntilUnlock, isWeekUnlocked, weeklyModules } from './src/data/curriculum';
 import { isAiReviewConfigured, reviewScamWithAi } from './src/services/aiScamReview';
 import { analyzeCallRisk } from './src/services/callRisk';
 import {
@@ -104,7 +110,9 @@ import {
   TrustedContact,
   WeeklyModule,
 } from './src/types/app';
-import { Btn, Card } from './src/ui/kit';
+import { matchPairs, scrambleWords, shuffle } from './src/data/games';
+import { requestAllPermissions } from './src/services/permissions';
+import { AnimatedToggle, Btn, Card, ListRow } from './src/ui/kit';
 
 LogBox.ignoreLogs(['Cannot connect to Expo CLI']);
 
@@ -127,7 +135,8 @@ type Screen =
   | 'voicemail'
   | 'activity'
   | 'settings'
-  | 'lesson';
+  | 'lesson'
+  | 'games';
 
 type ToggleState = Record<string, boolean>;
 
@@ -152,9 +161,10 @@ const screenTitles: Record<Screen, string> = {
   recovery: 'Help After a Scam',
   phone: 'Check a Number',
   voicemail: 'Voicemail',
-  activity: 'Activity',
+  activity: 'Notifications',
   settings: 'Settings',
   lesson: 'Lesson',
+  games: 'Games',
 };
 
 type ToolAction = { screen: Screen; label: string; detail: string; icon: LucideIcon; tone?: RiskLevel };
@@ -337,6 +347,10 @@ function MainApp() {
   const [phoneNumber, setPhoneNumber] = useState('');
   const [claimedIdentity, setClaimedIdentity] = useState('');
   const [callRisk, setCallRisk] = useState<CallRiskResult | null>(null);
+  const [notificationsVisible, setNotificationsVisible] = useState(false);
+  const [menuVisible, setMenuVisible] = useState(false);
+  const [aboutVisible, setAboutVisible] = useState(false);
+  const [game, setGame] = useState<'none' | 'scramble' | 'match'>('none');
   const [contactDrafts, setContactDrafts] = useState<TrustedContact[]>([
     { id: 'contact-1', label: 'Trusted Contact 1', name: '', phone: '' },
     { id: 'contact-2', label: 'Trusted Contact 2', name: '', phone: '' },
@@ -723,72 +737,87 @@ function MainApp() {
 
 
   function renderHeader() {
+    const bell = (
+      <TouchableOpacity
+        style={styles.headerIconBtn}
+        onPress={() => {
+          setNotificationsVisible(true);
+          markAllDetectionsRead();
+        }}
+        activeOpacity={0.7}
+        accessibilityLabel={`Notifications${unreadCount ? `, ${unreadCount} new` : ''}`}
+      >
+        <Bell size={theme.icon(26)} color={theme.colors.ink} strokeWidth={1.9} />
+        {unreadCount ? (
+          <View style={styles.headerBadge}>
+            <Text style={styles.headerBadgeText}>{unreadCount > 9 ? '9+' : unreadCount}</Text>
+          </View>
+        ) : null}
+      </TouchableOpacity>
+    );
+
     if (screen === 'home') {
-      const greeting = profile?.name ? `Hello, ${profile.name}` : 'Shield Our Elders';
+      const greeting = profile?.name ? `Hi, ${profile.name}` : 'Welcome';
       return (
         <View style={styles.header}>
-          <View style={styles.brandRow}>
+          <View style={styles.homeHeaderRow}>
             <View style={styles.logoMark}>
-              <ShieldCheck size={theme.icon(26)} color={theme.colors.onBrand} strokeWidth={2.4} />
+              <ShieldCheck size={theme.icon(28)} color={theme.colors.onBrand} strokeWidth={2} />
             </View>
             <View style={{ flex: 1 }}>
               <Text style={styles.brandName} numberOfLines={1}>
                 {greeting}
               </Text>
-              <Text style={styles.brandTagline}>Your calm second opinion</Text>
+              <Text style={styles.brandTagline} numberOfLines={1}>
+                Shield Our Elders
+              </Text>
             </View>
+            {bell}
+            <TouchableOpacity style={styles.headerIconBtn} onPress={() => setMenuVisible(true)} activeOpacity={0.7} accessibilityLabel="Menu and settings">
+              <Menu size={theme.icon(26)} color={theme.colors.ink} strokeWidth={1.9} />
+            </TouchableOpacity>
           </View>
         </View>
       );
     }
-    const backTo: Screen = screen === 'lesson' || screen === 'practice' ? 'learn' : 'home';
-    const backLabel = backTo === 'learn' ? 'Learn' : 'Home';
+    const backTo: Screen = screen === 'lesson' ? 'learn' : screen === 'practice' ? 'games' : 'home';
+    const backLabel = backTo === 'learn' ? 'Learn' : backTo === 'games' ? 'Games' : 'Home';
     return (
       <View style={styles.header}>
-        <View style={styles.headerNavRow}>
-          <TouchableOpacity style={styles.backButton} onPress={() => navigate(backTo)} activeOpacity={0.7} accessibilityLabel={`Back to ${backLabel}`}>
-            <ChevronLeft size={theme.icon(24)} color={theme.colors.brand} strokeWidth={2.8} />
-            <Text style={styles.backText}>{backLabel}</Text>
-          </TouchableOpacity>
-          <Text style={styles.title}>{screenTitles[screen]}</Text>
+        <View style={styles.headerTopRow}>
+          <View style={{ flex: 1 }}>
+            <TouchableOpacity style={styles.backButton} onPress={() => navigate(backTo)} activeOpacity={0.7} accessibilityLabel={`Back to ${backLabel}`}>
+              <ChevronLeft size={theme.icon(24)} color={theme.colors.brand} strokeWidth={2.4} />
+              <Text style={styles.backText}>{backLabel}</Text>
+            </TouchableOpacity>
+            <Text style={styles.title}>{screenTitles[screen]}</Text>
+          </View>
+          {bell}
         </View>
       </View>
     );
   }
 
   function renderBottomNav() {
-    const items: Array<{ screen: Screen; label: string; icon: LucideIcon; badge?: number }> = [
-      { screen: 'home', label: 'Home', icon: Home },
-      { screen: 'tools', label: 'Checks', icon: LayoutGrid },
-      { screen: 'learn', label: 'Learn', icon: BookOpen },
-      { screen: 'activity', label: 'Alerts', icon: Bell, badge: unreadCount },
-      { screen: 'settings', label: 'Settings', icon: SettingsIcon },
+    const items: Array<{ screen: Screen; label: string; icon: LucideIcon }> = [
+      { screen: 'home', label: 'Home', icon: House },
+      { screen: 'tools', label: 'Checks', icon: ShieldCheck },
+      { screen: 'learn', label: 'Learn', icon: GraduationCap },
+      { screen: 'games', label: 'Games', icon: Puzzle },
+      { screen: 'recovery', label: 'Recover', icon: LifeBuoy },
     ];
+    const activeTab: Screen = screen === 'lesson' ? 'learn' : screen === 'practice' ? 'games' : screen;
     return (
       <View style={styles.bottomNav}>
-        {items.map((item) => {
-          const Icon = item.icon;
-          const active = screen === item.screen;
-          return (
-            <TouchableOpacity key={item.screen} style={styles.navItem} onPress={() => navigate(item.screen)} activeOpacity={0.8} accessibilityRole="button" accessibilityState={{ selected: active }}>
-              <View style={[styles.navIconWrap, active && styles.navIconWrapActive]}>
-                <Icon size={theme.icon(30)} color={active ? theme.colors.brand : theme.colors.muted} strokeWidth={active ? 2.6 : 2.2} />
-                {item.badge ? (
-                  <View style={styles.navBadge}>
-                    <Text style={styles.navBadgeText}>{item.badge > 9 ? '9+' : item.badge}</Text>
-                  </View>
-                ) : null}
-              </View>
-              <Text style={[styles.navLabel, active && styles.navLabelActive]}>{item.label}</Text>
-            </TouchableOpacity>
-          );
-        })}
+        {items.map((item) => (
+          <NavItem key={item.screen} icon={item.icon} label={item.label} active={activeTab === item.screen} onPress={() => navigate(item.screen)} />
+        ))}
       </View>
     );
   }
 
   function renderHome() {
-    const modules = modulesForDifficulty(prefs.difficulty);
+    const modules = weeklyModules;
     const createdAt = profile?.createdAt ?? new Date().toISOString();
     const nextLesson =
       modules.find((m) => isWeekUnlocked(createdAt, m.week) && !progress.completedWeeks.includes(m.id)) ??
@@ -1011,23 +1040,47 @@ function MainApp() {
   }
 
   function renderEmergency() {
+    const dontDo: Array<{ icon: LucideIcon; text: string }> = [
+      { icon: PhoneOff, text: 'Hang up now. You do not have to stay on the call.' },
+      { icon: Ban, text: 'Do not send money, gift cards, or crypto.' },
+      { icon: LinkIcon, text: 'Do not click any links they sent you.' },
+      { icon: KeyRound, text: 'Do not share codes, passwords, or bank details.' },
+      { icon: MonitorOff, text: 'Do not install anything or allow remote access.' },
+    ];
     return (
       <View style={styles.stack}>
-        <View style={styles.stopPanel}>
-          <Siren size={theme.icon(42)} color={theme.colors.danger} strokeWidth={2.8} />
-          <Text style={styles.stopTitle}>Stop. You have time.</Text>
-          <Text style={styles.stopText}>A real bank, agency, or family member can wait.</Text>
-        </View>
-        {emergencySteps.map((step, index) => (
-          <View key={step} style={styles.stepRow}>
-            <View style={styles.stepNumber}>
-              <Text style={styles.stepNumberText}>{index + 1}</Text>
-            </View>
-            <Text style={styles.stepText}>{step}</Text>
+        <View style={styles.emergencyHero}>
+          <View style={styles.emergencyHeroIcon}>
+            <Siren size={theme.icon(42)} color={theme.colors.onBrand} strokeWidth={2} />
           </View>
-        ))}
+          <Text style={styles.emergencyHeroTitle}>Stop. You have time.</Text>
+          <Text style={styles.emergencyHeroText}>A real bank, agency, or family member can always wait. Take a slow breath.</Text>
+        </View>
+
+        <Text style={styles.emergencySectionTitle}>Right now, do NOT</Text>
+        <View style={styles.dontList}>
+          {dontDo.map((item, index) => {
+            const Icon = item.icon;
+            return (
+              <View key={item.text} style={[styles.dontRow, index < dontDo.length - 1 && styles.dontRowDivider]}>
+                <View style={styles.dontIcon}>
+                  <Icon size={theme.icon(24)} color={theme.colors.danger} strokeWidth={2} />
+                </View>
+                <Text style={styles.dontText}>{item.text}</Text>
+              </View>
+            );
+          })}
+        </View>
+
+        <Text style={styles.emergencySectionTitle}>Then get help</Text>
         <TrustedContactStrip contacts={contacts} onCall={callContact} onText={textContact} urgent />
-        <Btn label="Report fraud at ReportFraud.ftc.gov" icon={ExternalLink} onPress={() => Linking.openURL('https://reportfraud.ftc.gov/')} />
+        <View style={styles.emergencyInfo}>
+          <Phone size={theme.icon(22)} color={theme.colors.brand} strokeWidth={2} />
+          <Text style={styles.emergencyInfoText}>
+            Call the official number printed on your card or statement — never a number the caller gave you.
+          </Text>
+        </View>
+        <Btn label="Report fraud to the FTC" icon={ExternalLink} onPress={() => Linking.openURL('https://reportfraud.ftc.gov/')} />
       </View>
     );
   }
@@ -1197,7 +1250,7 @@ function MainApp() {
 
 
   function renderLearn() {
-    const modules = modulesForDifficulty(prefs.difficulty);
+    const modules = weeklyModules;
     const createdAt = profile?.createdAt ?? new Date().toISOString();
     const done = progress.completedWeeks.filter((id) => modules.some((m) => m.id === id)).length;
     const pct = modules.length ? Math.round((done / modules.length) * 100) : 0;
@@ -1410,8 +1463,8 @@ function MainApp() {
           <View style={styles.emptyIcon}>
             <Bell size={theme.icon(34)} color={theme.colors.brand} strokeWidth={2.2} />
           </View>
-          <Text style={styles.cardTitle}>No alerts yet</Text>
-          <Text style={[styles.cardBody, { textAlign: 'center' }]}>When a check finds a possible scam call, message, or link, it will appear here so you can review it any time.</Text>
+          <Text style={styles.cardTitle}>No notifications yet</Text>
+          <Text style={[styles.cardBody, { textAlign: 'center' }]}>When a check finds a possible scam call, message, or link, a notification appears here and on your phone.</Text>
         </View>
       );
     }
@@ -1421,6 +1474,19 @@ function MainApp() {
         {detections.map((event) => (
           <ActivityRow key={event.id} event={event} detailed />
         ))}
+      </View>
+    );
+  }
+
+  function renderGames() {
+    if (game === 'scramble') return <ScrambleGame onBack={() => setGame('none')} />;
+    if (game === 'match') return <MatchGame onBack={() => setGame('none')} />;
+    return (
+      <View style={styles.stack}>
+        <Text style={styles.screenIntro}>Fun ways to sharpen your scam-spotting. Play any time — there is no timer and no pressure.</Text>
+        <GameCard icon={Trophy} title="Spot the Scam" detail="Decide if real examples are safe or a scam." onPress={() => navigate('practice')} />
+        <GameCard icon={Shuffle} title="Word Scramble" detail="Unscramble common scam-safety words." onPress={() => setGame('scramble')} />
+        <GameCard icon={Puzzle} title="Match the Term" detail="Match each term to what it means." onPress={() => setGame('match')} />
       </View>
     );
   }
@@ -1459,8 +1525,8 @@ function MainApp() {
         return renderPhoneLookup();
       case 'voicemail':
         return renderVoicemail();
-      case 'activity':
-        return renderActivity();
+      case 'games':
+        return renderGames();
       case 'settings':
         return <Settings />;
       default:
@@ -1499,6 +1565,76 @@ function MainApp() {
       </Modal>
       <Modal visible={!walkthroughSeen} animationType="fade" onRequestClose={markWalkthroughSeen}>
         <Walkthrough onSkip={markWalkthroughSeen} onDone={startWalkthroughLesson} />
+      </Modal>
+
+      {/* Notifications (opened by the bell on every page) */}
+      <Modal visible={notificationsVisible} animationType="slide" onRequestClose={() => setNotificationsVisible(false)}>
+        <View style={styles.modalScreen}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>Notifications</Text>
+            <Pressable style={styles.closeButton} onPress={() => setNotificationsVisible(false)} accessibilityLabel="Close">
+              <X size={theme.icon(24)} color={theme.colors.ink} />
+            </Pressable>
+          </View>
+          <ScrollView contentContainerStyle={styles.modalContent}>{renderActivity()}</ScrollView>
+        </View>
+      </Modal>
+
+      {/* Menu / options (hamburger on home) */}
+      <Modal visible={menuVisible} animationType="slide" onRequestClose={() => setMenuVisible(false)}>
+        <View style={styles.modalScreen}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>Menu</Text>
+            <Pressable style={styles.closeButton} onPress={() => setMenuVisible(false)} accessibilityLabel="Close">
+              <X size={theme.icon(24)} color={theme.colors.ink} />
+            </Pressable>
+          </View>
+          <ScrollView contentContainerStyle={styles.modalContent}>
+            <Card style={{ gap: 0, padding: 0, paddingHorizontal: theme.space.lg }}>
+              <ListRow icon={SettingsIcon} label="Settings" onPress={() => { setMenuVisible(false); navigate('settings'); }} />
+              <ListRow icon={Bell} label="Notifications" onPress={() => { setMenuVisible(false); setNotificationsVisible(true); markAllDetectionsRead(); }} />
+              <ListRow icon={Users} label="Trusted contacts" onPress={() => { setMenuVisible(false); navigate('contacts'); }} />
+              <ListRow icon={KeyRound} label="App permissions" onPress={() => { requestAllPermissions(); }} />
+              <ListRow icon={Info} label="About Shield Our Elders" onPress={() => { setMenuVisible(false); setAboutVisible(true); }} last />
+            </Card>
+          </ScrollView>
+        </View>
+      </Modal>
+
+      {/* About Us */}
+      <Modal visible={aboutVisible} animationType="slide" onRequestClose={() => setAboutVisible(false)}>
+        <View style={styles.modalScreen}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>About Us</Text>
+            <Pressable style={styles.closeButton} onPress={() => setAboutVisible(false)} accessibilityLabel="Close">
+              <X size={theme.icon(24)} color={theme.colors.ink} />
+            </Pressable>
+          </View>
+          <ScrollView contentContainerStyle={styles.modalContent}>
+            <View style={styles.aboutHeroWrap}>
+              <View style={styles.aboutLogo}>
+                <ShieldCheck size={theme.icon(46)} color={theme.colors.onBrand} strokeWidth={2} />
+              </View>
+              <Text style={styles.aboutTitle}>Shield Our Elders</Text>
+              <Text style={styles.aboutTagline}>Senior-friendly scam defense</Text>
+            </View>
+            <Text style={styles.cardBody}>
+              Scams work by creating pressure. Our mission is simple: help older adults slow down, check whether a call, message, link, or payment is safe, and take a calm next step — without needing to be a technology expert.
+            </Text>
+            <Text style={styles.cardBody}>
+              Everything stays private on your device. We built this for seniors living independently and for the families and caregivers who help protect the people they love.
+            </Text>
+            <Card>
+              <Text style={styles.cardTitle}>What we believe</Text>
+              <View style={styles.bulletRow}><CheckCircle2 size={theme.icon(19)} color={theme.colors.brand} /><Text style={styles.bulletText}>You always have time to check.</Text></View>
+              <View style={styles.bulletRow}><CheckCircle2 size={theme.icon(19)} color={theme.colors.brand} /><Text style={styles.bulletText}>Clear, plain language beats jargon.</Text></View>
+              <View style={styles.bulletRow}><CheckCircle2 size={theme.icon(19)} color={theme.colors.brand} /><Text style={styles.bulletText}>Your privacy is part of your safety.</Text></View>
+            </Card>
+            <Text style={styles.smallMuted}>
+              Shield Our Elders offers scam-safety guidance only. It does not replace your bank, the police, lawyers, or emergency services. For immediate danger, call your local emergency number.
+            </Text>
+          </ScrollView>
+        </View>
       </Modal>
     </KeyboardAvoidingView>
   );
@@ -1730,7 +1866,7 @@ function ToggleRow({ label, value, onValueChange }: { label: string; value: bool
   return (
     <View style={styles.toggleRow}>
       <Text style={styles.toggleLabel}>{label}</Text>
-      <Switch value={value} onValueChange={onValueChange} trackColor={{ false: theme.colors.lineStrong, true: theme.colors.brand }} thumbColor={theme.colors.white} accessibilityLabel={label} />
+      <AnimatedToggle value={value} onValueChange={onValueChange} accessibilityLabel={label} />
     </View>
   );
 }
@@ -2129,6 +2265,203 @@ function Walkthrough({ onDone, onSkip }: { onDone: () => void; onSkip: () => voi
 // Themed styles
 // ---------------------------------------------------------------------------
 
+// Bottom-nav item: color-only active state (no background pill), big icon,
+// gentle press animation.
+function NavItem({ icon: Icon, label, active, onPress }: { icon: LucideIcon; label: string; active: boolean; onPress: () => void }) {
+  const theme = useTheme();
+  const styles = useMemo(() => makeStyles(theme), [theme]);
+  const scale = useRef(new Animated.Value(1)).current;
+  const press = (to: number) => {
+    if (theme.reducedMotion) return;
+    Animated.spring(scale, { toValue: to, useNativeDriver: true, speed: 60, bounciness: 8 }).start();
+  };
+  const color = active ? theme.colors.brand : theme.colors.muted;
+  return (
+    <TouchableOpacity
+      style={styles.navItem}
+      onPress={onPress}
+      onPressIn={() => press(0.88)}
+      onPressOut={() => press(1)}
+      activeOpacity={0.8}
+      accessibilityRole="button"
+      accessibilityState={{ selected: active }}
+      accessibilityLabel={label}
+    >
+      <Animated.View style={{ transform: [{ scale }] }}>
+        <Icon size={theme.icon(30)} color={color} strokeWidth={active ? 2.1 : 1.8} />
+      </Animated.View>
+      <Text style={[styles.navLabel, { color }, active && styles.navLabelActive]}>{label}</Text>
+    </TouchableOpacity>
+  );
+}
+
+function GameCard({ icon: Icon, title, detail, onPress }: { icon: LucideIcon; title: string; detail: string; onPress: () => void }) {
+  const theme = useTheme();
+  const styles = useMemo(() => makeStyles(theme), [theme]);
+  const scale = useRef(new Animated.Value(1)).current;
+  const press = (to: number) => {
+    if (theme.reducedMotion) return;
+    Animated.spring(scale, { toValue: to, useNativeDriver: true, speed: 40, bounciness: 5 }).start();
+  };
+  return (
+    <Animated.View style={{ transform: [{ scale }] }}>
+      <Pressable style={styles.gameCard} onPress={onPress} onPressIn={() => press(0.97)} onPressOut={() => press(1)} accessibilityRole="button" accessibilityLabel={`${title}. ${detail}`}>
+        <View style={styles.gameIcon}>
+          <Icon size={theme.icon(30)} color={theme.colors.brand} strokeWidth={2} />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.gameTitle}>{title}</Text>
+          <Text style={styles.gameDetail}>{detail}</Text>
+        </View>
+        <ChevronRight size={theme.icon(24)} color={theme.colors.faint} strokeWidth={2} />
+      </Pressable>
+    </Animated.View>
+  );
+}
+
+function ScrambleGame({ onBack }: { onBack: () => void }) {
+  const theme = useTheme();
+  const styles = useMemo(() => makeStyles(theme), [theme]);
+  const [index, setIndex] = useState(0);
+  const word = scrambleWords[index % scrambleWords.length];
+  const [scrambled, setScrambled] = useState<string[]>(() => shuffle(word.word.split('')));
+  const [picked, setPicked] = useState<number[]>([]);
+  const answer = picked.map((i) => scrambled[i]).join('');
+  const filled = picked.length === word.word.length;
+  const solved = filled && answer === word.word;
+
+  function goNext() {
+    const next = index + 1;
+    const w = scrambleWords[next % scrambleWords.length];
+    setIndex(next);
+    setScrambled(shuffle(w.word.split('')));
+    setPicked([]);
+  }
+
+  return (
+    <View style={styles.stack}>
+      <TouchableOpacity style={styles.gameBack} onPress={onBack} accessibilityRole="button">
+        <ChevronLeft size={theme.icon(22)} color={theme.colors.brand} strokeWidth={2.2} />
+        <Text style={styles.gameBackText}>All games</Text>
+      </TouchableOpacity>
+      <Text style={styles.gameHeading}>Word Scramble</Text>
+      <View style={styles.hintBox}>
+        <Text style={styles.hintLabel}>Hint</Text>
+        <Text style={styles.hintText}>{word.hint}</Text>
+      </View>
+      <View style={styles.answerRow}>
+        {word.word.split('').map((_, i) => (
+          <View key={i} style={[styles.answerSlot, solved && styles.answerSlotSolved, filled && !solved && styles.answerSlotWrong]}>
+            <Text style={styles.answerSlotText}>{picked[i] != null ? scrambled[picked[i]] : ''}</Text>
+          </View>
+        ))}
+      </View>
+      <View style={styles.tileRow}>
+        {scrambled.map((ch, i) => {
+          const used = picked.includes(i);
+          return (
+            <TouchableOpacity
+              key={i}
+              disabled={used || solved}
+              style={[styles.letterTile, used && styles.letterTileUsed]}
+              onPress={() => setPicked((p) => [...p, i])}
+              accessibilityLabel={`letter ${ch}`}
+            >
+              <Text style={[styles.letterText, used && { color: theme.colors.faint }]}>{ch}</Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+      {solved ? (
+        <View style={styles.gameWin}>
+          <CheckCircle2 size={theme.icon(24)} color={theme.colors.low} strokeWidth={2.2} />
+          <Text style={styles.gameWinText}>Correct — {word.word}!</Text>
+        </View>
+      ) : null}
+      <View style={styles.buttonRow}>
+        <SecondaryAction icon={X} label="Undo" onPress={() => setPicked((p) => p.slice(0, -1))} disabled={!picked.length || solved} />
+        <SecondaryAction icon={Shuffle} label="Reshuffle" onPress={() => { setScrambled(shuffle(word.word.split(''))); setPicked([]); }} disabled={solved} />
+      </View>
+      {solved ? <Btn label="Next word" icon={ChevronRight} onPress={goNext} /> : null}
+    </View>
+  );
+}
+
+function MatchGame({ onBack }: { onBack: () => void }) {
+  const theme = useTheme();
+  const styles = useMemo(() => makeStyles(theme), [theme]);
+  const [meanings] = useState(() => shuffle(matchPairs));
+  const [selected, setSelected] = useState<string | null>(null);
+  const [matched, setMatched] = useState<string[]>([]);
+  const [wrong, setWrong] = useState<string | null>(null);
+  const allDone = matched.length === matchPairs.length;
+
+  function tapMeaning(term: string) {
+    if (matched.includes(term)) return;
+    if (!selected) return;
+    if (selected === term) {
+      setMatched((m) => [...m, term]);
+      setSelected(null);
+    } else {
+      setWrong(term);
+      setTimeout(() => setWrong(null), 700);
+    }
+  }
+
+  return (
+    <View style={styles.stack}>
+      <TouchableOpacity style={styles.gameBack} onPress={onBack} accessibilityRole="button">
+        <ChevronLeft size={theme.icon(22)} color={theme.colors.brand} strokeWidth={2.2} />
+        <Text style={styles.gameBackText}>All games</Text>
+      </TouchableOpacity>
+      <Text style={styles.gameHeading}>Match the Term</Text>
+      <Text style={styles.screenIntro}>Tap a term on the left, then its meaning on the right.</Text>
+      <View style={styles.matchGrid}>
+        <View style={styles.matchCol}>
+          {matchPairs.map((p) => {
+            const done = matched.includes(p.term);
+            const sel = selected === p.term;
+            return (
+              <TouchableOpacity
+                key={p.term}
+                disabled={done}
+                onPress={() => setSelected(p.term)}
+                style={[styles.matchChip, sel && styles.matchChipSel, done && styles.matchChipDone]}
+                accessibilityRole="button"
+              >
+                <Text style={[styles.matchChipText, done && { color: theme.colors.onBrand }]}>{p.term}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+        <View style={styles.matchCol}>
+          {meanings.map((p) => {
+            const done = matched.includes(p.term);
+            const isWrong = wrong === p.term;
+            return (
+              <TouchableOpacity
+                key={p.term}
+                disabled={done}
+                onPress={() => tapMeaning(p.term)}
+                style={[styles.matchChip, styles.matchMeaning, done && styles.matchChipDone, isWrong && styles.matchChipWrong]}
+                accessibilityRole="button"
+              >
+                <Text style={[styles.matchMeaningText, done && { color: theme.colors.onBrand }]}>{p.meaning}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      </View>
+      {allDone ? (
+        <View style={styles.gameWin}>
+          <CheckCircle2 size={theme.icon(24)} color={theme.colors.low} strokeWidth={2.2} />
+          <Text style={styles.gameWinText}>All matched — well done!</Text>
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
 function makeStyles(t: Theme) {
   return StyleSheet.create({
     app: { flex: 1, backgroundColor: t.colors.bg },
@@ -2486,6 +2819,78 @@ function makeStyles(t: Theme) {
     walkDot: { width: 9, height: 9, borderRadius: 5, backgroundColor: t.colors.lineStrong },
     walkDotActive: { width: 24, backgroundColor: t.colors.brand },
     walkFooter: { padding: t.space.xl, paddingBottom: 34 },
+
+    // Header actions --------------------------------------------------------
+    homeHeaderRow: { flexDirection: 'row', alignItems: 'center', gap: t.space.md },
+    headerTopRow: { flexDirection: 'row', alignItems: 'flex-start', gap: t.space.sm },
+    headerIconBtn: { width: t.tap(46), height: t.tap(46), borderRadius: t.radius.pill, backgroundColor: t.colors.surfaceMuted, alignItems: 'center', justifyContent: 'center' },
+    headerBadge: {
+      position: 'absolute',
+      top: 4,
+      right: 4,
+      minWidth: 18,
+      height: 18,
+      borderRadius: 9,
+      paddingHorizontal: 4,
+      backgroundColor: t.colors.danger,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderWidth: 1.5,
+      borderColor: t.colors.surface,
+    },
+    headerBadgeText: { fontSize: 10, fontWeight: t.weight.bold, color: t.colors.white },
+
+    // Emergency page --------------------------------------------------------
+    emergencyHero: { alignItems: 'center', gap: t.space.sm, backgroundColor: t.colors.danger, borderRadius: t.radius.lg, padding: t.space.xl, ...t.shadow('card') },
+    emergencyHeroIcon: { width: t.tap(72), height: t.tap(72), borderRadius: t.radius.pill, backgroundColor: 'rgba(255,255,255,0.18)', alignItems: 'center', justifyContent: 'center', marginBottom: 2 },
+    emergencyHeroTitle: { fontSize: t.font('h1'), fontWeight: t.weight.bold, color: t.colors.onBrand, textAlign: 'center', letterSpacing: -0.4 },
+    emergencyHeroText: { fontSize: t.font('body'), lineHeight: t.lineHeight('body'), color: 'rgba(255,255,255,0.92)', textAlign: 'center', fontWeight: t.weight.medium },
+    emergencySectionTitle: { fontSize: t.font('h3'), fontWeight: t.weight.bold, color: t.colors.ink, letterSpacing: -0.3, marginTop: t.space.xs },
+    dontList: { backgroundColor: t.colors.surface, borderRadius: t.radius.lg, borderWidth: 1, borderColor: t.colors.dangerBorder, overflow: 'hidden', ...t.shadow('soft') },
+    dontRow: { flexDirection: 'row', alignItems: 'center', gap: t.space.md, padding: t.space.lg },
+    dontRowDivider: { borderBottomWidth: 1, borderBottomColor: t.colors.line },
+    dontIcon: { width: t.tap(48), height: t.tap(48), borderRadius: t.radius.sm, backgroundColor: t.colors.dangerTint, alignItems: 'center', justifyContent: 'center' },
+    dontText: { flex: 1, fontSize: t.font('bodySm'), lineHeight: t.lineHeight('bodySm'), color: t.colors.ink, fontWeight: t.weight.semibold },
+    emergencyInfo: { flexDirection: 'row', alignItems: 'center', gap: t.space.md, backgroundColor: t.colors.brandTint, borderRadius: t.radius.md, padding: t.space.lg },
+    emergencyInfoText: { flex: 1, fontSize: t.font('bodySm'), lineHeight: t.lineHeight('bodySm'), color: t.colors.ink, fontWeight: t.weight.medium },
+
+    // About Us --------------------------------------------------------------
+    aboutHeroWrap: { alignItems: 'center', gap: t.space.xs, marginBottom: t.space.sm },
+    aboutLogo: { width: t.tap(84), height: t.tap(84), borderRadius: t.radius.lg, backgroundColor: t.colors.brand, alignItems: 'center', justifyContent: 'center', marginBottom: t.space.xs, ...t.shadow('card') },
+    aboutTitle: { fontSize: t.font('h1'), fontWeight: t.weight.bold, color: t.colors.ink, letterSpacing: -0.4 },
+    aboutTagline: { fontSize: t.font('bodySm'), color: t.colors.muted, fontWeight: t.weight.semibold },
+
+    // Games -----------------------------------------------------------------
+    gameCard: { flexDirection: 'row', alignItems: 'center', gap: t.space.md, backgroundColor: t.colors.surface, borderRadius: t.radius.lg, borderWidth: 1, borderColor: t.colors.line, padding: t.space.lg, minHeight: t.tap(80), ...t.shadow('soft') },
+    gameIcon: { width: t.tap(56), height: t.tap(56), borderRadius: t.radius.md, backgroundColor: t.colors.brandTint, alignItems: 'center', justifyContent: 'center' },
+    gameTitle: { fontSize: t.font('h3'), fontWeight: t.weight.bold, color: t.colors.ink, letterSpacing: -0.2 },
+    gameDetail: { fontSize: t.font('label'), color: t.colors.muted, fontWeight: t.weight.medium, marginTop: 2 },
+    gameBack: { flexDirection: 'row', alignItems: 'center', gap: 2, alignSelf: 'flex-start' },
+    gameBackText: { fontSize: t.font('bodySm'), fontWeight: t.weight.semibold, color: t.colors.brand },
+    gameHeading: { fontSize: t.font('h1'), fontWeight: t.weight.bold, color: t.colors.ink, letterSpacing: -0.4 },
+    hintBox: { backgroundColor: t.colors.surfaceMuted, borderRadius: t.radius.md, borderWidth: 1, borderColor: t.colors.line, padding: t.space.lg, gap: 4 },
+    hintLabel: { fontSize: t.font('tiny'), fontWeight: t.weight.bold, color: t.colors.muted, textTransform: 'uppercase', letterSpacing: 0.8 },
+    hintText: { fontSize: t.font('body'), lineHeight: t.lineHeight('body'), color: t.colors.ink, fontWeight: t.weight.medium },
+    answerRow: { flexDirection: 'row', flexWrap: 'wrap', gap: t.space.sm, justifyContent: 'center' },
+    answerSlot: { minWidth: t.tap(40), height: t.tap(52), paddingHorizontal: 6, borderRadius: t.radius.sm, borderWidth: 2, borderColor: t.colors.lineStrong, backgroundColor: t.colors.surface, alignItems: 'center', justifyContent: 'center' },
+    answerSlotSolved: { borderColor: t.colors.low, backgroundColor: t.colors.lowTint },
+    answerSlotWrong: { borderColor: t.colors.danger, backgroundColor: t.colors.dangerTint },
+    answerSlotText: { fontSize: t.font('h2'), fontWeight: t.weight.bold, color: t.colors.ink },
+    tileRow: { flexDirection: 'row', flexWrap: 'wrap', gap: t.space.sm, justifyContent: 'center' },
+    letterTile: { width: t.tap(52), height: t.tap(52), borderRadius: t.radius.sm, backgroundColor: t.colors.brand, alignItems: 'center', justifyContent: 'center', ...t.shadow('soft') },
+    letterTileUsed: { backgroundColor: t.colors.surfaceMuted },
+    letterText: { fontSize: t.font('h2'), fontWeight: t.weight.bold, color: t.colors.onBrand },
+    gameWin: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: t.space.sm, backgroundColor: t.colors.lowTint, borderRadius: t.radius.md, borderWidth: 1, borderColor: t.colors.low, padding: t.space.lg },
+    gameWinText: { fontSize: t.font('h3'), fontWeight: t.weight.bold, color: t.colors.low },
+    matchGrid: { flexDirection: 'row', gap: t.space.md },
+    matchCol: { flex: 1, gap: t.space.md },
+    matchChip: { minHeight: t.tap(70), borderRadius: t.radius.md, borderWidth: 1.5, borderColor: t.colors.line, backgroundColor: t.colors.surface, alignItems: 'center', justifyContent: 'center', paddingHorizontal: t.space.md, paddingVertical: t.space.sm },
+    matchMeaning: {},
+    matchChipSel: { borderColor: t.colors.brand, backgroundColor: t.colors.brandTintSoft },
+    matchChipDone: { borderColor: t.colors.low, backgroundColor: t.colors.low },
+    matchChipWrong: { borderColor: t.colors.danger, backgroundColor: t.colors.dangerTint },
+    matchChipText: { fontSize: t.font('bodySm'), fontWeight: t.weight.bold, color: t.colors.ink, textAlign: 'center' },
+    matchMeaningText: { fontSize: t.font('label'), fontWeight: t.weight.medium, color: t.colors.ink, textAlign: 'center', lineHeight: t.lineHeight('label') },
 
     modalScreen: { flex: 1, backgroundColor: t.colors.bg },
     modalHeader: {

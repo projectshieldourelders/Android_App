@@ -69,6 +69,7 @@ export const defaultPreferences: Preferences = {
   alertSensitivity: 'balanced',
   learningFrequency: 'weekly',
   difficulty: 'beginner',
+  aiResponseStyle: 'balanced',
   accessibility: {
     textSize: 'default',
     iconSize: 'default',

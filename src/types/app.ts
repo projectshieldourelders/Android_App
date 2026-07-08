@@ -104,6 +104,8 @@ export type NotificationCadence = 'off' | 'weekly' | 'biweekly';
 export type AlertSensitivity = 'low' | 'balanced' | 'high';
 export type LearningFrequency = 'off' | 'weekly' | 'biweekly';
 export type Difficulty = 'beginner' | 'intermediate' | 'advanced';
+// How the user wants AI/analysis explanations written.
+export type AiResponseStyle = 'simple' | 'balanced' | 'detailed';
 
 export interface AccessibilityPrefs {
   textSize: ScalePref;
@@ -121,6 +123,7 @@ export interface Preferences {
   alertSensitivity: AlertSensitivity;
   learningFrequency: LearningFrequency;
   difficulty: Difficulty;
+  aiResponseStyle: AiResponseStyle;
   accessibility: AccessibilityPrefs;
 }
 

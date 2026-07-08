@@ -17,6 +17,7 @@ import { privacyFull, termsFull } from '../data/legal';
 import { cancelAllReminders, scheduleSafetyReminders } from '../services/notifications';
 import { useApp, useTheme } from '../state/AppProvider';
 import {
+  AiResponseStyle,
   AlertSensitivity,
   Difficulty,
   LearningFrequency,
@@ -171,6 +172,20 @@ export default function Settings() {
       <View>
         <SectionLabel>Learning</SectionLabel>
         <Card style={{ gap: theme.space.lg }}>
+          <View style={{ gap: theme.space.sm }}>
+            <AppText variant="bodySm" weight="semibold">
+              How we explain things
+            </AppText>
+            <SegmentedControl<AiResponseStyle>
+              options={[
+                { value: 'simple', label: 'Simple' },
+                { value: 'balanced', label: 'Balanced' },
+                { value: 'detailed', label: 'Detailed' },
+              ]}
+              value={prefs.aiResponseStyle}
+              onChange={(value) => updatePrefs({ aiResponseStyle: value })}
+            />
+          </View>
           <View style={{ gap: theme.space.sm }}>
             <AppText variant="bodySm" weight="semibold">
               Lesson difficulty

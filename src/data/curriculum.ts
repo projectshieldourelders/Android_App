@@ -429,6 +429,377 @@ export const weeklyModules: WeeklyModule[] = [
     ],
     remember: 'Guaranteed returns + urgency = scam. Real investing has risk and no rush.',
   },
+  {
+    id: 'week-9',
+    week: 9,
+    title: 'Medicare and health insurance scams',
+    minutes: 5,
+    difficulty: 'intermediate',
+    lesson:
+      'Scammers call pretending to be from Medicare, offering "free" braces, testing kits, or a new card in exchange for your Medicare number. Medicare will never call out of the blue to ask for your number or to sell you something.',
+    keyPoints: [
+      'Medicare does not call to sell products or ask for your number.',
+      'Your Medicare number is as sensitive as a credit card number.',
+      '"Free" offers that need your number are a trap.',
+    ],
+    example: {
+      channel: 'Phone call',
+      message: '"You qualify for a free back brace through Medicare. I just need to confirm your Medicare number."',
+    },
+    explanation:
+      'Real Medicare benefits do not require cold calls collecting your number. The "free" item is bait to steal your identity or bill fraud in your name.',
+    quiz: [
+      {
+        prompt: 'Someone calls offering a free brace if you give your Medicare number. You should:',
+        options: ['Give it — the item is free', 'Refuse and hang up', 'Give only the last 4 digits'],
+        answerIndex: 1,
+        whyCorrect: 'Medicare does not cold-call to sell items. Sharing the number enables identity theft and fraud.',
+      },
+      {
+        prompt: 'Your Medicare number should be treated like:',
+        options: ['A phone number', 'A credit card number', 'A home address'],
+        answerIndex: 1,
+        whyCorrect: 'It can be used for fraudulent billing and identity theft, so guard it closely.',
+      },
+      {
+        prompt: 'Does Medicare call people to sell products?',
+        options: ['Yes, often', 'No, never', 'Only in winter'],
+        answerIndex: 1,
+        whyCorrect: 'Medicare does not make unsolicited sales calls. Such a call is a scam.',
+      },
+      {
+        prompt: 'A "free" health offer that requires your Medicare number is usually:',
+        options: ['A good deal', 'A scam', 'A government program'],
+        answerIndex: 1,
+        whyCorrect: 'The free offer is bait to collect your number for fraud.',
+      },
+      {
+        prompt: 'If you are unsure about a Medicare call, you should:',
+        options: ['Call the number on your Medicare card', 'Call the number the caller gave', 'Give your number to check'],
+        answerIndex: 0,
+        whyCorrect: 'Always verify using the official number on your card, never a caller-supplied number.',
+      },
+    ],
+    remember: 'Medicare never cold-calls for your number. Guard it like a credit card.',
+  },
+  {
+    id: 'week-10',
+    week: 10,
+    title: 'Government imposter scams (IRS & Social Security)',
+    minutes: 5,
+    difficulty: 'intermediate',
+    lesson:
+      'Scammers pose as the IRS or Social Security, claiming you owe money or that your benefits will stop, then threaten arrest unless you pay immediately. Real agencies contact you by mail first and never demand instant payment or gift cards.',
+    keyPoints: [
+      'Government agencies contact you by mail, not threatening calls.',
+      'They never demand gift cards, wire transfers, or crypto.',
+      'Threats of immediate arrest are a scam tactic.',
+    ],
+    example: {
+      channel: 'Phone call',
+      message: '"This is the IRS. A warrant is out for your arrest. Pay $2,000 in gift cards today to avoid jail."',
+    },
+    explanation:
+      'The IRS does not call with arrest threats or accept gift cards. Fear and urgency are used to stop you from checking.',
+    quiz: [
+      {
+        prompt: 'The "IRS" calls threatening arrest unless you pay with gift cards. This is:',
+        options: ['A real IRS process', 'A scam', 'Only real if they know your name'],
+        answerIndex: 1,
+        whyCorrect: 'The IRS never threatens arrest by phone or takes gift cards. It is always a scam.',
+      },
+      {
+        prompt: 'Real government agencies usually first contact you by:',
+        options: ['Threatening phone call', 'Official mail', 'Social media'],
+        answerIndex: 1,
+        whyCorrect: 'Agencies like the IRS contact you by mail first, not surprise threatening calls.',
+      },
+      {
+        prompt: 'A caller says your Social Security number is "suspended." This is:',
+        options: ['Possible and serious', 'A scam — SSNs are not suspended', 'A normal warning'],
+        answerIndex: 1,
+        whyCorrect: 'Social Security numbers are never "suspended." That claim is a known scam.',
+      },
+      {
+        prompt: 'Government agencies accept payment by:',
+        options: ['Gift cards', 'Wire transfer to an agent', 'Official documented methods, never gift cards'],
+        answerIndex: 2,
+        whyCorrect: 'No agency collects debts via gift cards or crypto. That demand reveals a scam.',
+      },
+      {
+        prompt: 'If you get a threatening "government" call, you should:',
+        options: ['Pay immediately', 'Hang up and contact the agency through its official website', 'Give your SSN to verify'],
+        answerIndex: 1,
+        whyCorrect: 'Hang up and verify through official channels; never act on the threat.',
+      },
+    ],
+    remember: 'Government agencies mail first and never demand gift cards or threaten arrest.',
+  },
+  {
+    id: 'week-11',
+    week: 11,
+    title: 'Package delivery text scams',
+    minutes: 4,
+    difficulty: 'beginner',
+    lesson:
+      'A text says your package is stuck and you must pay a small "redelivery fee" or update your address through a link. The link leads to a fake page that steals your card and personal details.',
+    keyPoints: [
+      'Carriers do not text for fees through random links.',
+      'A small fee request is designed to feel harmless.',
+      'Track packages only through the official carrier app or website.',
+    ],
+    example: {
+      channel: 'Text message',
+      message: 'USPS: Your package is on hold due to an unpaid fee of $1.99. Pay here: usps-redeliver.info',
+    },
+    explanation:
+      'The tiny fee lowers your guard, but the real goal is your card number on a fake page. The domain is not the real usps.com.',
+    quiz: [
+      {
+        prompt: 'A text asks for a $1.99 package "redelivery fee" via a link. You should:',
+        options: ['Pay — it is only $1.99', 'Ignore it and check the carrier’s official site', 'Reply with your address'],
+        answerIndex: 1,
+        whyCorrect: 'The small fee is bait for your card details on a fake page. Verify on the official site.',
+      },
+      {
+        prompt: 'The small fee amount is used to:',
+        options: ['Cover real costs', 'Make the scam feel harmless', 'Speed up delivery'],
+        answerIndex: 1,
+        whyCorrect: 'A tiny amount lowers your guard so you enter card details without thinking.',
+      },
+      {
+        prompt: 'The safest way to track a package is:',
+        options: ['The link in the text', 'The official carrier app or website', 'Calling the number in the text'],
+        answerIndex: 1,
+        whyCorrect: 'Use the official carrier app/site with your real tracking number.',
+      },
+      {
+        prompt: '"usps-redeliver.info" is suspicious because:',
+        options: ['It is not the real usps.com domain', 'It is too long', 'USPS has no website'],
+        answerIndex: 0,
+        whyCorrect: 'The real domain is usps.com. Look-alike domains signal a scam.',
+      },
+      {
+        prompt: 'You were not expecting a package but got this text. That means:',
+        options: ['You should still pay', 'It is even more likely a scam', 'A gift is coming'],
+        answerIndex: 1,
+        whyCorrect: 'An unexpected delivery text is a strong sign of a phishing attempt.',
+      },
+    ],
+    remember: 'Carriers don’t text for fees. Track only on the official site.',
+  },
+  {
+    id: 'week-12',
+    week: 12,
+    title: 'Tech support and remote access scams',
+    minutes: 6,
+    difficulty: 'intermediate',
+    lesson:
+      'A pop-up or call claims your computer has a virus and offers to "fix" it — if you let them connect remotely or pay a fee. Once they have remote access, they can steal files, passwords, and money.',
+    keyPoints: [
+      'Real companies do not cold-call about computer viruses.',
+      'Never let a stranger control your device remotely.',
+      'Pop-ups with phone numbers are almost always fake.',
+    ],
+    example: {
+      channel: 'Pop-up',
+      message: 'WARNING! Your computer is infected. Call Microsoft Support now at 1-800-555-0199.',
+    },
+    explanation:
+      'Microsoft and Apple never put a support number in a virus pop-up. The goal is to get you on the phone and grant remote access.',
+    quiz: [
+      {
+        prompt: 'A pop-up says to call a number because your computer is infected. You should:',
+        options: ['Call the number', 'Close it and never call', 'Let them connect to fix it'],
+        answerIndex: 1,
+        whyCorrect: 'Real virus warnings never include a call number. Close it and do not call.',
+      },
+      {
+        prompt: 'Letting an unknown "technician" control your device remotely lets them:',
+        options: ['Safely fix things', 'Steal files, passwords, and money', 'Nothing harmful'],
+        answerIndex: 1,
+        whyCorrect: 'Remote access gives them full control to steal data and money.',
+      },
+      {
+        prompt: 'Do Microsoft or Apple cold-call about viruses on your computer?',
+        options: ['Yes, regularly', 'No, never', 'Only if you registered'],
+        answerIndex: 1,
+        whyCorrect: 'They do not make unsolicited virus calls. Such calls are scams.',
+      },
+      {
+        prompt: 'A tech "fee" paid by gift card to remove a virus is:',
+        options: ['Normal', 'A scam', 'Refundable'],
+        answerIndex: 1,
+        whyCorrect: 'Gift-card payment plus remote access is a classic tech-support scam.',
+      },
+      {
+        prompt: 'If you already gave remote access, a good next step is:',
+        options: ['Do nothing', 'Disconnect, run security software, and change passwords', 'Pay them to leave'],
+        answerIndex: 1,
+        whyCorrect: 'Cut the connection, secure the device, and change passwords from another device.',
+      },
+    ],
+    remember: 'No real company cold-calls about viruses. Never give remote access.',
+  },
+  {
+    id: 'week-13',
+    week: 13,
+    title: 'Fake bank and account alerts',
+    minutes: 4,
+    difficulty: 'beginner',
+    lesson:
+      'A text or call claims there is a suspicious charge and asks you to "confirm" your details or read back a code to stop it. That code or login is exactly what the scammer needs to take your money.',
+    keyPoints: [
+      'Banks never ask you to read back a security code.',
+      'Do not confirm card or login details from an alert you did not expect.',
+      'Call the number on the back of your card to check.',
+    ],
+    example: {
+      channel: 'Text message',
+      message: 'Bank Alert: Did you spend $499 at BestBuy? Reply NO and call 1-888-555-0142 to secure your account.',
+    },
+    explanation:
+      'The scary charge makes you call their number, where they ask for codes or logins. Use the number on your card instead.',
+    quiz: [
+      {
+        prompt: 'A "bank" text asks you to call their number about a charge. You should:',
+        options: ['Call that number', 'Call the number on the back of your card', 'Reply with your PIN'],
+        answerIndex: 1,
+        whyCorrect: 'Use the verified number on your card, not one supplied in the alert.',
+      },
+      {
+        prompt: 'Your bank asks you to read back a text code to "verify." This is:',
+        options: ['Standard practice', 'A scam — never share codes', 'Fine over the phone'],
+        answerIndex: 1,
+        whyCorrect: 'Banks never ask for one-time codes. That request is a scam.',
+      },
+      {
+        prompt: 'A surprise "big charge" alert is designed to make you feel:',
+        options: ['Calm', 'Panicked so you act fast', 'Bored'],
+        answerIndex: 1,
+        whyCorrect: 'Panic pushes you to call and hand over details without checking.',
+      },
+      {
+        prompt: 'Confirming your full card number from an unexpected alert is:',
+        options: ['Safe', 'Risky — it may be a scam', 'Required'],
+        answerIndex: 1,
+        whyCorrect: 'Never confirm sensitive details from an alert you did not initiate.',
+      },
+      {
+        prompt: 'The safest way to check a bank alert is to:',
+        options: ['Trust the text', 'Log in through the official app or call the card number', 'Reply to the text'],
+        answerIndex: 1,
+        whyCorrect: 'Check through the official app or the number on your card.',
+      },
+    ],
+    remember: 'Banks never ask for codes. Call the number on your card.',
+  },
+  {
+    id: 'week-14',
+    week: 14,
+    title: 'Fake invoices and auto-renewals',
+    minutes: 5,
+    difficulty: 'advanced',
+    lesson:
+      'You get an email "receipt" for a subscription you never bought (often antivirus or tech services), with a phone number to "cancel" or get a refund. Calling leads to remote-access or refund scams.',
+    keyPoints: [
+      'A receipt for something you did not buy is a lure, not a bill.',
+      'The "cancel/refund" number leads to scammers, not a company.',
+      'Check your real bank statement instead of calling.',
+    ],
+    example: {
+      channel: 'Email',
+      message: 'Your Norton subscription auto-renewed for $399.99. To cancel, call 1-800-555-0170 within 24 hours.',
+    },
+    explanation:
+      'The fake charge and short deadline push you to call. On the call they ask for remote access or "refund" you into sending money back.',
+    quiz: [
+      {
+        prompt: 'You get an invoice for antivirus you never bought, with a number to call. You should:',
+        options: ['Call to cancel', 'Ignore it and check your real bank statement', 'Reply with your card to cancel'],
+        answerIndex: 1,
+        whyCorrect: 'The invoice is fake bait. Verify charges through your actual bank, not their number.',
+      },
+      {
+        prompt: 'The "call to cancel/refund" number usually leads to:',
+        options: ['A real company', 'Scammers seeking remote access or money', 'Your bank'],
+        answerIndex: 1,
+        whyCorrect: 'It connects you to the scammers, who escalate to remote access or refund tricks.',
+      },
+      {
+        prompt: 'A "refund" where they ask you to send money back is:',
+        options: ['A normal refund', 'A refund scam', 'A bank policy'],
+        answerIndex: 1,
+        whyCorrect: 'Claiming they "overpaid" your refund and asking for money back is a known scam.',
+      },
+      {
+        prompt: 'A short deadline ("call within 24 hours") is used to:',
+        options: ['Help you', 'Pressure you into calling fast', 'Follow the law'],
+        answerIndex: 1,
+        whyCorrect: 'The deadline creates urgency so you skip verifying.',
+      },
+      {
+        prompt: 'The best way to confirm a charge is real is to:',
+        options: ['Call the number in the email', 'Check your bank/card statement directly', 'Trust the email total'],
+        answerIndex: 1,
+        whyCorrect: 'Your real statement shows genuine charges; the email number cannot be trusted.',
+      },
+    ],
+    remember: 'A bill for something you never bought is bait. Check your real statement.',
+  },
+  {
+    id: 'week-15',
+    week: 15,
+    title: 'Recovery scams (the second wave)',
+    minutes: 5,
+    difficulty: 'advanced',
+    lesson:
+      'After someone loses money to a scam, a new "recovery" contact promises to get it back — for a fee. These target people who were already scammed, often using lists shared among criminals.',
+    keyPoints: [
+      'No one legitimate guarantees to recover lost money for an upfront fee.',
+      'Being scammed once can put you on a target list.',
+      'Report to official agencies — never pay a "recovery" service.',
+    ],
+    example: {
+      channel: 'Phone call',
+      message: '"We are a fund recovery agency. We can get your lost $5,000 back. Just pay a $500 processing fee first."',
+    },
+    explanation:
+      'Real authorities do not charge upfront to recover money. This is a second scam aimed at people already hurt once.',
+    quiz: [
+      {
+        prompt: 'Someone promises to recover your lost money for a $500 upfront fee. This is:',
+        options: ['A helpful service', 'A recovery scam', 'A government program'],
+        answerIndex: 1,
+        whyCorrect: 'Upfront fees to "recover" money are a second scam. Never pay.',
+      },
+      {
+        prompt: 'Why are scam victims often targeted again?',
+        options: ['Bad luck', 'Their info is shared on target lists', 'They asked to be'],
+        answerIndex: 1,
+        whyCorrect: 'Criminals share lists of prior victims, who are then hit with recovery scams.',
+      },
+      {
+        prompt: 'Legitimate authorities recover money by:',
+        options: ['Charging you upfront fees', 'Official processes with no upfront fee', 'Gift cards'],
+        answerIndex: 1,
+        whyCorrect: 'Real help never requires an upfront fee to release your own money.',
+      },
+      {
+        prompt: 'If contacted by a "recovery agency," you should:',
+        options: ['Pay the fee', 'Refuse and report it', 'Send your bank login'],
+        answerIndex: 1,
+        whyCorrect: 'Refuse, and report the contact to official fraud authorities.',
+      },
+      {
+        prompt: 'After a scam, the right place to turn is:',
+        options: ['A paid recovery service', 'Your bank and official fraud reporting', 'The person who scammed you'],
+        answerIndex: 1,
+        whyCorrect: 'Contact your bank and official agencies — not a paid recovery service.',
+      },
+    ],
+    remember: 'No one recovers your money for an upfront fee. That’s a second scam.',
+  },
 ];
 
 const difficultyRank: Record<Difficulty, number> = { beginner: 0, intermediate: 1, advanced: 2 };

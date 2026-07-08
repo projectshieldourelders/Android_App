@@ -1,10 +1,11 @@
 import { Check, ChevronRight } from 'lucide-react-native';
 import type { LucideIcon } from 'lucide-react-native';
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useRef } from 'react';
 import {
+  Animated,
+  Easing,
   KeyboardTypeOptions,
   StyleSheet,
-  Switch,
   Text,
   TextInput,
   TouchableOpacity,
@@ -103,22 +104,88 @@ export function Btn({
       ? theme.colors.onBrand
       : theme.colors.brand;
 
+  const scale = useRef(new Animated.Value(1)).current;
+  const press = (to: number) => {
+    if (theme.reducedMotion) return;
+    Animated.spring(scale, { toValue: to, useNativeDriver: true, speed: 50, bounciness: 7 }).start();
+  };
+
+  return (
+    <Animated.View style={[{ transform: [{ scale }] }, !full && { alignSelf: 'flex-start' }]}>
+      <TouchableOpacity
+        style={[
+          styles.btn,
+          { backgroundColor: bg, minHeight: theme.tap(54) },
+          variant === 'ghost' && { borderWidth: 1.5, borderColor: theme.colors.line },
+          !full && { paddingHorizontal: theme.space.xl },
+        ]}
+        onPress={onPress}
+        onPressIn={() => press(0.96)}
+        onPressOut={() => press(1)}
+        disabled={disabled}
+        activeOpacity={0.9}
+        accessibilityRole="button"
+        accessibilityState={{ disabled: Boolean(disabled) }}
+      >
+        {Icon ? <Icon size={theme.icon(20)} color={fg} strokeWidth={2} /> : null}
+        <Text style={{ fontSize: theme.font('body'), fontWeight: theme.weight.bold, color: fg }}>{label}</Text>
+      </TouchableOpacity>
+    </Animated.View>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Animated toggle (custom switch with a sliding thumb + color transition)
+// ---------------------------------------------------------------------------
+
+export function AnimatedToggle({
+  value,
+  onValueChange,
+  accessibilityLabel,
+}: {
+  value: boolean;
+  onValueChange: (value: boolean) => void;
+  accessibilityLabel?: string;
+}) {
+  const theme = useTheme();
+  const anim = useRef(new Animated.Value(value ? 1 : 0)).current;
+
+  useEffect(() => {
+    Animated.timing(anim, {
+      toValue: value ? 1 : 0,
+      duration: theme.reducedMotion ? 0 : 200,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: false,
+    }).start();
+  }, [value, anim, theme.reducedMotion]);
+
+  const trackW = theme.tap(58);
+  const trackH = theme.tap(34);
+  const pad = 3;
+  const thumb = trackH - pad * 2;
+  const translateX = anim.interpolate({ inputRange: [0, 1], outputRange: [pad, trackW - thumb - pad] });
+  const backgroundColor = anim.interpolate({ inputRange: [0, 1], outputRange: [theme.colors.lineStrong, theme.colors.brand] });
+
   return (
     <TouchableOpacity
-      style={[
-        styles.btn,
-        { backgroundColor: bg, minHeight: theme.tap(54) },
-        variant === 'ghost' && { borderWidth: 1.5, borderColor: theme.colors.line },
-        !full && { alignSelf: 'flex-start', paddingHorizontal: theme.space.xl },
-      ]}
-      onPress={onPress}
-      disabled={disabled}
-      activeOpacity={0.85}
-      accessibilityRole="button"
-      accessibilityState={{ disabled: Boolean(disabled) }}
+      activeOpacity={0.9}
+      onPress={() => onValueChange(!value)}
+      accessibilityRole="switch"
+      accessibilityState={{ checked: value }}
+      accessibilityLabel={accessibilityLabel}
     >
-      {Icon ? <Icon size={theme.icon(20)} color={fg} strokeWidth={2.4} /> : null}
-      <Text style={{ fontSize: theme.font('body'), fontWeight: theme.weight.bold, color: fg }}>{label}</Text>
+      <Animated.View style={{ width: trackW, height: trackH, borderRadius: trackH / 2, backgroundColor, justifyContent: 'center' }}>
+        <Animated.View
+          style={{
+            width: thumb,
+            height: thumb,
+            borderRadius: thumb / 2,
+            backgroundColor: theme.colors.white,
+            transform: [{ translateX }],
+            ...theme.shadow('soft'),
+          }}
+        />
+      </Animated.View>
     </TouchableOpacity>
   );
 }
@@ -202,7 +269,7 @@ export function OptionCard({
         ) : null}
       </View>
       <View style={[styles.radio, { borderColor: selected ? theme.colors.brand : theme.colors.lineStrong, backgroundColor: selected ? theme.colors.brand : 'transparent' }]}>
-        {selected ? <Check size={theme.icon(15)} color={theme.colors.onBrand} strokeWidth={3} /> : null}
+        {selected ? <Check size={theme.icon(15)} color={theme.colors.onBrand} strokeWidth={2.6} /> : null}
       </View>
     </TouchableOpacity>
   );
@@ -231,7 +298,7 @@ export function SwitchRow({
     <View style={[styles.switchRow, { minHeight: theme.tap(56) }]}>
       {Icon ? (
         <View style={[styles.rowIcon, { backgroundColor: theme.colors.brandTint }]}>
-          <Icon size={theme.icon(22)} color={theme.colors.brand} strokeWidth={2.3} />
+          <Icon size={theme.icon(22)} color={theme.colors.brand} strokeWidth={1.9} />
         </View>
       ) : null}
       <View style={{ flex: 1 }}>
@@ -240,13 +307,7 @@ export function SwitchRow({
           <Text style={{ fontSize: theme.font('label'), color: theme.colors.muted, marginTop: 2, lineHeight: theme.lineHeight('label') }}>{description}</Text>
         ) : null}
       </View>
-      <Switch
-        value={value}
-        onValueChange={onValueChange}
-        trackColor={{ false: theme.colors.lineStrong, true: theme.colors.brand }}
-        thumbColor={theme.colors.white}
-        accessibilityLabel={label}
-      />
+      <AnimatedToggle value={value} onValueChange={onValueChange} accessibilityLabel={label} />
     </View>
   );
 }
@@ -324,12 +385,12 @@ export function ListRow({
     >
       {Icon ? (
         <View style={[styles.rowIcon, { backgroundColor: danger ? theme.colors.dangerTint : theme.colors.brandTint }]}>
-          <Icon size={theme.icon(21)} color={danger ? theme.colors.danger : theme.colors.brand} strokeWidth={2.3} />
+          <Icon size={theme.icon(21)} color={danger ? theme.colors.danger : theme.colors.brand} strokeWidth={1.9} />
         </View>
       ) : null}
       <Text style={{ flex: 1, fontSize: theme.font('bodySm'), fontWeight: theme.weight.semibold, color }}>{label}</Text>
       {value ? <Text style={{ fontSize: theme.font('label'), color: theme.colors.muted, marginRight: 4 }}>{value}</Text> : null}
-      {onPress ? <ChevronRight size={theme.icon(20)} color={theme.colors.faint} strokeWidth={2.3} /> : null}
+      {onPress ? <ChevronRight size={theme.icon(20)} color={theme.colors.faint} strokeWidth={1.9} /> : null}
     </TouchableOpacity>
   );
 }
