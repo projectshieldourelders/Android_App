@@ -6,6 +6,8 @@ import {
   analyzeUrl,
   analyzeVoiceClone,
 } from '../src/services/scamAnalyzer';
+import { combineModelReviews, createHfSpamReviewFromChatContent, createHfSpamReviewFromScores } from '../src/services/huggingFaceSpam';
+import { practiceExamples } from '../src/data/content';
 import { RiskLevel } from '../src/types/app';
 
 type MessageCase = {
@@ -105,5 +107,42 @@ expectAtLeast('Fake brand domain', analyzeUrl('https://amazon-account-security.e
 expectAtMost('Official FTC report URL', analyzeUrl('https://reportfraud.ftc.gov/').level, 'low');
 expectAtLeast('Unknown phone number', analyzePhoneNumber('321-555-0199').level, 'caution');
 expectAtMost('Known Medicare number', analyzePhoneNumber('1-800-633-4227').level, 'low');
+
+for (const answer of ['safe', 'suspicious', 'scam'] as const) {
+  assert(practiceExamples.some((example) => example.answer === answer), `Practice quiz missing ${answer} answer`);
+}
+
+for (const example of practiceExamples) {
+  assert(example.message.trim().length > 0, `${example.id}: missing practice message`);
+  assert(example.explanation.trim().length > 0, `${example.id}: missing practice explanation`);
+}
+
+const hfSpam = createHfSpamReviewFromScores([
+  { label: 'LABEL_0', score: 0.03 },
+  { label: 'LABEL_1', score: 0.97 },
+]);
+if (!hfSpam) throw new Error('Hugging Face spam label mapping returned no review.');
+assert(hfSpam?.level === 'stop', `Hugging Face spam label mapping failed: ${hfSpam?.level}`);
+
+const hfHam = createHfSpamReviewFromScores([
+  { label: 'LABEL_0', score: 0.96 },
+  { label: 'LABEL_1', score: 0.04 },
+]);
+if (!hfHam) throw new Error('Hugging Face ham label mapping returned no review.');
+assert(hfHam?.level === 'low', `Hugging Face ham label mapping failed: ${hfHam?.level}`);
+
+const modelReview = createHfSpamReviewFromChatContent(
+  JSON.stringify({
+    risk_score: 100,
+    verdict: 'scam',
+    explanation: 'The model says the message is trying to get payment information for a prize claim.',
+    reasons: ['Requests credit card details', 'Unsolicited prize claim'],
+    next_steps: ['Do not reply', 'Do not provide card information'],
+  }),
+);
+assert(modelReview.level === 'stop', `Hugging Face scam review parsing failed: ${modelReview.level}`);
+
+const combinedReview = combineModelReviews([hfHam, modelReview]);
+assert(combinedReview?.level === 'stop', `Hugging Face ensemble failed to use highest model risk: ${combinedReview?.level}`);
 
 console.log('Scam analyzer tests passed');

@@ -15,6 +15,10 @@ The app is built around older-adult usability needs: large touch targets, high-c
 - Payment safety checks for gift cards, crypto, wire transfers, Zelle, Cash App, and Venmo
 - Scam alerts, short lessons, practice examples, and recovery steps
 - Local-first storage for trusted contacts and practice progress
+- Optional Hugging Face SMS spam check for pasted message text
+- Hugging Face screenshot text extraction for OCR
+- Hugging Face voicemail audio transcription
+- Optional AI screenshot review when an OpenAI vision model is configured
 
 ## Development
 
@@ -26,3 +30,24 @@ npx expo start
 ```
 
 For Android emulator testing, open the Expo URL in Expo Go or run the app through Android Studio/Expo tooling.
+
+## Optional Model Checks
+
+The app works without model keys using the local scam checker.
+
+To enable Hugging Face model checks for pasted text, screenshots, and voicemail files, copy `.env.example` to `.env` and set:
+
+```bash
+EXPO_PUBLIC_HUGGINGFACE_API_KEY=your_hf_token_here
+EXPO_PUBLIC_HUGGINGFACE_MODEL=mrm8488/bert-tiny-finetuned-sms-spam-detection
+EXPO_PUBLIC_HUGGINGFACE_CLASSIFIER_MODELS=mrm8488/bert-tiny-finetuned-sms-spam-detection
+EXPO_PUBLIC_HUGGINGFACE_SCAM_REVIEW_MODEL=google/gemma-4-31B-it:cerebras
+EXPO_PUBLIC_HUGGINGFACE_OCR_MODEL=google/gemma-4-31B-it:cerebras
+EXPO_PUBLIC_HUGGINGFACE_ASR_MODEL=openai/whisper-large-v3-turbo
+```
+
+The pasted-text check can combine multiple Hugging Face classifiers with the scam review model. Screenshot OCR first extracts visible words, then the text check can score that text. Audio transcription fills the voicemail transcript box before analysis.
+
+To enable the separate OpenAI screenshot review, set `EXPO_PUBLIC_OPENAI_API_KEY` as well.
+
+For a real public release, do not ship private API keys inside the Android app. Put model calls behind a small server endpoint and have the app call that server instead.

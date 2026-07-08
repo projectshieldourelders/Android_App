@@ -33,6 +33,26 @@ export type AnalysisResult = {
   matchedTerms: string[];
 };
 
+export type AiScamReview = {
+  score: number;
+  level: RiskLevel;
+  headline: string;
+  summary: string;
+  reasons: string[];
+  nextSteps: string[];
+  screenshotText?: string;
+};
+
+export type HfSpamReview = {
+  score: number;
+  level: RiskLevel;
+  label: string;
+  headline: string;
+  summary: string;
+  reasons: string[];
+  nextSteps: string[];
+};
+
 export type TrustedContact = {
   id: string;
   label: string;

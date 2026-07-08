@@ -18,6 +18,7 @@ import {
   Home,
   LifeBuoy,
   Link as LinkIcon,
+  Mail,
   MessageCircle,
   Mic,
   Newspaper,
@@ -35,9 +36,11 @@ import {
   X,
 } from 'lucide-react-native';
 import type { LucideIcon } from 'lucide-react-native';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
+  Animated,
+  Easing,
   Image,
   KeyboardAvoidingView,
   LogBox,
@@ -55,6 +58,14 @@ import {
 import type { DimensionValue, ImageStyle } from 'react-native';
 
 import { emergencySteps, lessons, practiceExamples, recoverySteps, trustedContactMessage } from './src/data/content';
+import { isAiReviewConfigured, reviewScamWithAi } from './src/services/aiScamReview';
+import {
+  isHfOcrConfigured,
+  isHfTranscriptionConfigured,
+  readScreenshotTextWithHuggingFace,
+  transcribeAudioWithHuggingFace,
+} from './src/services/huggingFaceMedia';
+import { checkSpamWithHuggingFace, isHfSpamCheckConfigured } from './src/services/huggingFaceSpam';
 import { fetchScamAlerts } from './src/services/news';
 import {
   analyzeCallChecklist,
@@ -74,7 +85,7 @@ import {
   saveContacts,
   saveFamilyPhrase,
 } from './src/services/storage';
-import { AnalysisResult, ConfidenceEntry, RiskLevel, ScamAlert, TrustedContact } from './src/types/app';
+import { AiScamReview, AnalysisResult, ConfidenceEntry, HfSpamReview, RiskLevel, ScamAlert, TrustedContact } from './src/types/app';
 
 LogBox.ignoreLogs(['Cannot connect to Expo CLI']);
 
@@ -97,6 +108,10 @@ type Screen =
   | 'voicemail';
 
 type ToggleState = Record<string, boolean>;
+
+function normalizeCheckInput(value: string) {
+  return value.trim().replace(/\s+/g, ' ').toLowerCase();
+}
 
 const initialCallAnswers: ToggleState = {
   money: false,
@@ -125,52 +140,124 @@ const initialPayments: ToggleState = {
 };
 
 const screenTitles: Record<Screen, string> = {
-  home: 'Shield Check',
-  tools: 'Safety Tools',
-  scam: 'Message Check',
-  call: 'I Just Got a Call',
+  home: 'Start',
+  tools: 'Checks',
+  scam: 'Message',
+  call: 'Phone Call',
   emergency: 'Emergency',
-  contacts: 'Trusted Contacts',
-  link: 'Link Check',
-  qr: 'QR Code Check',
-  voice: 'Family Voice Check',
-  payment: 'Before Paying',
-  news: 'Scam Alerts',
+  contacts: 'People to Call',
+  link: 'Link',
+  qr: 'QR Code',
+  voice: 'Family Voice',
+  payment: 'Before You Pay',
+  news: 'Alerts',
   learn: 'Learn',
-  practice: 'Practice',
-  recovery: 'Recovery Guide',
-  phone: 'Number Check',
-  voicemail: 'Voicemail Notes',
+  practice: 'Quiz',
+  recovery: 'Help After a Scam',
+  phone: 'Phone Number',
+  voicemail: 'Voicemail',
 };
 
-const quickTools: Array<{ screen: Screen; label: string; detail: string; icon: LucideIcon; tone?: RiskLevel }> = [
-  { screen: 'scam', label: 'Check a Message', detail: 'Text, email, screenshot, or transcript', icon: ShieldCheck },
-  { screen: 'call', label: 'I Got a Call', detail: 'Answer simple yes/no questions', icon: PhoneCall },
-  { screen: 'link', label: 'Check a Link', detail: 'Look before opening', icon: LinkIcon },
-  { screen: 'qr', label: 'Scan a QR Code', detail: 'See where it goes first', icon: QrCode },
-  { screen: 'voice', label: 'Family Voice Check', detail: 'Use a family phrase', icon: Mic },
-  { screen: 'payment', label: 'Before Paying', detail: 'Gift cards, crypto, wire, Zelle', icon: CreditCard },
-  { screen: 'phone', label: 'Check a Number', detail: 'Verify before calling back', icon: Search },
-  { screen: 'voicemail', label: 'Voicemail Notes', detail: 'Paste what the caller said', icon: FileAudio },
-  { screen: 'practice', label: 'Practice Examples', detail: 'Learn warning signs', icon: Trophy },
-  { screen: 'recovery', label: 'I Already Clicked or Paid', detail: 'Do these steps now', icon: LifeBuoy, tone: 'high' },
+type ToolAction = { screen: Screen; label: string; detail: string; icon: LucideIcon; tone?: RiskLevel };
+
+type LiveNotice = {
+  id: string;
+  title: string;
+  body: string;
+  label: string;
+  screen: Screen;
+  icon: LucideIcon;
+  level: RiskLevel;
+};
+
+const liveNotices: LiveNotice[] = [
+  {
+    id: 'incoming-call',
+    title: 'Incoming call',
+    body: 'Unknown number. Ask: did they request money, secrecy, a code, or remote access?',
+    label: 'Check call',
+    screen: 'call',
+    icon: PhoneCall,
+    level: 'caution',
+  },
+  {
+    id: 'new-message',
+    title: 'New message',
+    body: 'Prize, payment, and account messages should be checked before replying.',
+    label: 'Check message',
+    screen: 'scam',
+    icon: MessageCircle,
+    level: 'caution',
+  },
+  {
+    id: 'unknown-email',
+    title: 'Unknown email',
+    body: 'Sender is unfamiliar. Check links, attachments, and requests before opening.',
+    label: 'Check email',
+    screen: 'scam',
+    icon: Mail,
+    level: 'high',
+  },
+  {
+    id: 'likely-spam',
+    title: 'Likely spam alert',
+    body: 'Pressure, payment, or private information requests need a trusted second look.',
+    label: 'Safety steps',
+    screen: 'emergency',
+    icon: ShieldAlert,
+    level: 'stop',
+  },
 ];
 
-const homePrimaryActions: Array<{ screen: Screen; label: string; detail: string; icon: LucideIcon; tone?: RiskLevel }> = [
-  { screen: 'scam', label: 'Check a message', detail: 'Paste text, screenshot, or voicemail transcript.', icon: ShieldCheck },
-  { screen: 'call', label: 'I got a call', detail: 'Answer five yes/no questions.', icon: PhoneCall },
-  { screen: 'contacts', label: 'Call a trusted person', detail: 'Call or text someone you trust.', icon: Users },
+const toolGroups: Array<{ title: string; items: ToolAction[] }> = [
+  {
+    title: 'Before you reply',
+    items: [
+      { screen: 'scam', label: 'Message or email', detail: 'Paste the words', icon: ShieldCheck },
+      { screen: 'call', label: 'Phone call', detail: 'Answer yes or no', icon: PhoneCall },
+      { screen: 'voicemail', label: 'Voicemail', detail: 'Add notes from the call', icon: FileAudio },
+    ],
+  },
+  {
+    title: 'Before you open',
+    items: [
+      { screen: 'link', label: 'Link', detail: 'Check the address', icon: LinkIcon },
+      { screen: 'qr', label: 'QR code', detail: 'Preview the destination', icon: QrCode },
+      { screen: 'phone', label: 'Phone number', detail: 'Check before calling back', icon: Search },
+    ],
+  },
+  {
+    title: 'Money or family',
+    items: [
+      { screen: 'voice', label: 'Family voice', detail: 'Use your phrase', icon: Mic },
+      { screen: 'payment', label: 'Before you pay', detail: 'Check the payment type', icon: CreditCard },
+      { screen: 'recovery', label: 'Already clicked or paid', detail: 'Start here', icon: LifeBuoy, tone: 'high' },
+    ],
+  },
+  {
+    title: 'Keep learning',
+    items: [
+      { screen: 'practice', label: 'Quiz', detail: 'Practice with examples', icon: Trophy },
+      { screen: 'news', label: 'Alerts', detail: 'Current scam patterns', icon: Newspaper },
+    ],
+  },
+];
+
+const homePrimaryActions: ToolAction[] = [
+  { screen: 'scam', label: 'Message or email', detail: 'Paste the words.', icon: ShieldCheck },
+  { screen: 'call', label: 'Phone call', detail: 'Answer yes or no.', icon: PhoneCall },
+  { screen: 'contacts', label: 'Trusted person', detail: 'Call or text them.', icon: Users },
 ];
 
 const openingSteps: Array<{ title: string; detail?: string }> = [
   {
-    title: '1. Stop. You have time.',
+    title: 'Stop',
   },
   {
-    title: '2. Pick one situation below.',
+    title: 'Check',
   },
   {
-    title: '3. Verify with a trusted person.',
+    title: 'Call someone',
   },
 ];
 
@@ -183,7 +270,7 @@ function levelBackground(level: RiskLevel) {
     case 'caution':
       return '#FFFBEB';
     default:
-      return '#ECFDF5';
+      return '#EFF8F5';
   }
 }
 
@@ -198,15 +285,40 @@ function normalizePhone(phone: string) {
 }
 
 export default function App() {
+  const scrollRef = useRef<ScrollView>(null);
+  const screenAnim = useRef(new Animated.Value(1)).current;
+  const noticeAnim = useRef(new Animated.Value(1)).current;
+  const urgentPulse = useRef(new Animated.Value(0)).current;
   const [screen, setScreen] = useState<Screen>('home');
+  const [liveNoticeIndex, setLiveNoticeIndex] = useState(0);
   const [contacts, setContacts] = useState<TrustedContact[]>([]);
   const [confidence, setConfidence] = useState<ConfidenceEntry[]>([]);
   const [familyPhrase, setFamilyPhrase] = useState('');
   const [alerts, setAlerts] = useState<ScamAlert[]>([]);
   const [messageText, setMessageText] = useState('');
   const [screenshotUri, setScreenshotUri] = useState('');
+  const [screenshotBase64, setScreenshotBase64] = useState('');
+  const [screenshotMimeType, setScreenshotMimeType] = useState('image/jpeg');
   const [voicemailTranscript, setVoicemailTranscript] = useState('');
   const [voicemailFile, setVoicemailFile] = useState('');
+  const [voicemailUri, setVoicemailUri] = useState('');
+  const [voicemailMimeType, setVoicemailMimeType] = useState('');
+  const [ocrText, setOcrText] = useState('');
+  const [ocrError, setOcrError] = useState('');
+  const [ocrLoading, setOcrLoading] = useState(false);
+  const [transcriptionError, setTranscriptionError] = useState('');
+  const [transcriptionLoading, setTranscriptionLoading] = useState(false);
+  const [aiReview, setAiReview] = useState<AiScamReview | null>(null);
+  const [aiReviewError, setAiReviewError] = useState('');
+  const [aiReviewLoading, setAiReviewLoading] = useState(false);
+  const [hfSpamReview, setHfSpamReview] = useState<HfSpamReview | null>(null);
+  const [hfSpamError, setHfSpamError] = useState('');
+  const [hfSpamNotice, setHfSpamNotice] = useState('');
+  const [hfSpamLoading, setHfSpamLoading] = useState(false);
+  const hfSpamRequestInFlight = useRef(false);
+  const lastHfSpamInput = useRef('');
+  const lastHfSpamReview = useRef<HfSpamReview | null>(null);
+  const currentHfSpamInput = useRef('');
   const [callAnswers, setCallAnswers] = useState<ToggleState>(initialCallAnswers);
   const [voiceAnswers, setVoiceAnswers] = useState<ToggleState>(initialVoiceAnswers);
   const [paymentAnswers, setPaymentAnswers] = useState<ToggleState>(initialPayments);
@@ -247,6 +359,56 @@ export default function App() {
     hydrate();
   }, []);
 
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ y: 0, animated: false });
+    screenAnim.setValue(0);
+    Animated.timing(screenAnim, {
+      toValue: 1,
+      duration: 220,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  }, [screen, screenAnim]);
+
+  useEffect(() => {
+    noticeAnim.setValue(0);
+    Animated.timing(noticeAnim, {
+      toValue: 1,
+      duration: 360,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  }, [liveNoticeIndex, noticeAnim]);
+
+  useEffect(() => {
+    const noticeTimer = setInterval(() => {
+      setLiveNoticeIndex((current) => (current + 1) % liveNotices.length);
+    }, 5200);
+    const pulse = Animated.loop(
+      Animated.sequence([
+        Animated.timing(urgentPulse, {
+          toValue: 1,
+          duration: 1100,
+          easing: Easing.inOut(Easing.cubic),
+          useNativeDriver: true,
+        }),
+        Animated.timing(urgentPulse, {
+          toValue: 0,
+          duration: 1100,
+          easing: Easing.inOut(Easing.cubic),
+          useNativeDriver: true,
+        }),
+      ]),
+    );
+
+    pulse.start();
+
+    return () => {
+      clearInterval(noticeTimer);
+      pulse.stop();
+    };
+  }, [urgentPulse]);
+
   const scamResult = useMemo(
     () => analyzeMessage([messageText, voicemailTranscript].filter(Boolean).join('\n'), 'message or transcript'),
     [messageText, voicemailTranscript],
@@ -257,10 +419,28 @@ export default function App() {
   const linkResult = useMemo(() => analyzeUrl(urlText), [urlText]);
   const qrResult = useMemo(() => analyzeUrl(qrValue), [qrValue]);
   const phoneResult = useMemo(() => analyzePhoneNumber(phoneNumber), [phoneNumber]);
-  const latestConfidence = confidence.at(-1)?.score ?? 72;
+  const hasScamInput = Boolean(messageText.trim() || voicemailTranscript.trim());
+  const hasMessageReviewInput = Boolean(messageText.trim() || voicemailTranscript.trim() || screenshotBase64);
+  const hfSpamInputText = [messageText, voicemailTranscript].filter(Boolean).join('\n');
+  const hasHfTextInput = Boolean(hfSpamInputText.trim());
+  const hasCallAnswers = Object.values(callAnswers).some(Boolean);
+  const hasVoiceAnswers = Object.values(voiceAnswers).some(Boolean);
+  const hasPaymentAnswers = Object.values(paymentAnswers).some(Boolean);
+  const hasUrlInput = Boolean(urlText.trim());
+  const hasQrInput = Boolean(qrValue.trim());
+  const hasPhoneInput = Boolean(phoneNumber.trim());
+  const hasVoicemailInput = Boolean(voicemailTranscript.trim());
+  const storedConfidence = confidence.at(-1)?.score ?? 0;
+  const quizScore = practiceStats.answered ? Math.round((practiceStats.correct / practiceStats.answered) * 100) : storedConfidence;
   const practice = practiceExamples[practiceIndex % practiceExamples.length];
+  const practiceNumber = (practiceIndex % practiceExamples.length) + 1;
+
+  useEffect(() => {
+    currentHfSpamInput.current = normalizeCheckInput(hfSpamInputText);
+  }, [hfSpamInputText]);
 
   function navigate(next: Screen) {
+    if (next === screen) return;
     setScreen(next);
     if (next !== 'qr') setScanning(false);
   }
@@ -280,9 +460,171 @@ export default function App() {
       mediaTypes: ['images'],
       allowsEditing: false,
       quality: 0.85,
+      base64: true,
     });
 
-    if (!result.canceled) setScreenshotUri(result.assets[0].uri);
+    if (!result.canceled) {
+      setScreenshotUri(result.assets[0].uri);
+      setScreenshotBase64(result.assets[0].base64 ?? '');
+      setScreenshotMimeType(result.assets[0].mimeType ?? 'image/jpeg');
+      setAiReview(null);
+      setAiReviewError('');
+      setOcrText('');
+      setOcrError('');
+    }
+  }
+
+  function updateMessageText(value: string) {
+    setMessageText(value);
+    setAiReview(null);
+    setAiReviewError('');
+    setHfSpamReview(null);
+    setHfSpamError('');
+    setHfSpamNotice('');
+    setOcrError('');
+  }
+
+  function updateVoicemailTranscript(value: string) {
+    setVoicemailTranscript(value);
+    setAiReview(null);
+    setAiReviewError('');
+    setHfSpamReview(null);
+    setHfSpamError('');
+    setHfSpamNotice('');
+    setTranscriptionError('');
+  }
+
+  function clearMessageCheck() {
+    setMessageText('');
+    setVoicemailTranscript('');
+    setScreenshotUri('');
+    setScreenshotBase64('');
+    setScreenshotMimeType('image/jpeg');
+    setVoicemailFile('');
+    setVoicemailUri('');
+    setVoicemailMimeType('');
+    setOcrText('');
+    setOcrError('');
+    setTranscriptionError('');
+    setAiReview(null);
+    setAiReviewError('');
+    setHfSpamReview(null);
+    setHfSpamError('');
+    setHfSpamNotice('');
+  }
+
+  async function runScreenshotOcr() {
+    if (!screenshotBase64) {
+      Alert.alert('Add a screenshot first', 'Choose a screenshot before reading it.');
+      return;
+    }
+
+    setOcrLoading(true);
+    setOcrError('');
+
+    try {
+      const text = await readScreenshotTextWithHuggingFace(screenshotBase64, screenshotMimeType);
+      setOcrText(text);
+      setMessageText((current) => (current.trim() ? `${current.trim()}\n${text}` : text));
+      setAiReview(null);
+      setHfSpamReview(null);
+      setHfSpamNotice('');
+    } catch (error) {
+      setOcrText('');
+      setOcrError(error instanceof Error ? error.message : 'Screenshot reading failed.');
+    } finally {
+      setOcrLoading(false);
+    }
+  }
+
+  async function runAudioTranscription() {
+    if (!voicemailUri) {
+      Alert.alert('Upload audio first', 'Choose a voicemail audio file before transcribing.');
+      return;
+    }
+
+    setTranscriptionLoading(true);
+    setTranscriptionError('');
+
+    try {
+      const text = await transcribeAudioWithHuggingFace(voicemailUri, voicemailMimeType || 'audio/mpeg');
+      setVoicemailTranscript((current) => (current.trim() ? `${current.trim()}\n${text}` : text));
+      setAiReview(null);
+      setHfSpamReview(null);
+      setHfSpamNotice('');
+    } catch (error) {
+      setTranscriptionError(error instanceof Error ? error.message : 'Audio transcription failed.');
+    } finally {
+      setTranscriptionLoading(false);
+    }
+  }
+
+  async function runHfSpamCheck() {
+    const input = hfSpamInputText.trim();
+    const normalizedInput = normalizeCheckInput(input);
+
+    if (!normalizedInput) {
+      Alert.alert('Paste words first', 'This spam model checks pasted text, not screenshots.');
+      return;
+    }
+
+    if (hfSpamRequestInFlight.current) {
+      setHfSpamNotice('This message is already being checked.');
+      return;
+    }
+
+    if (lastHfSpamInput.current === normalizedInput && lastHfSpamReview.current) {
+      setHfSpamReview(lastHfSpamReview.current);
+      setHfSpamError('');
+      setHfSpamNotice('You already checked this message. Showing the saved result.');
+      return;
+    }
+
+    hfSpamRequestInFlight.current = true;
+    setHfSpamLoading(true);
+    setHfSpamError('');
+    setHfSpamNotice('');
+
+    try {
+      const review = await checkSpamWithHuggingFace(input);
+      lastHfSpamInput.current = normalizedInput;
+      lastHfSpamReview.current = review;
+
+      if (currentHfSpamInput.current === normalizedInput) {
+        setHfSpamReview(review);
+      }
+    } catch (error) {
+      setHfSpamReview(null);
+      setHfSpamError(error instanceof Error ? error.message : 'SMS spam check failed.');
+    } finally {
+      hfSpamRequestInFlight.current = false;
+      setHfSpamLoading(false);
+    }
+  }
+
+  async function runAiReview() {
+    if (!hasMessageReviewInput) {
+      Alert.alert('Add something to check', 'Paste a message or attach a screenshot first.');
+      return;
+    }
+
+    setAiReviewLoading(true);
+    setAiReviewError('');
+
+    try {
+      const review = await reviewScamWithAi({
+        messageText,
+        transcript: voicemailTranscript,
+        screenshotBase64,
+        localResult: scamResult,
+      });
+      setAiReview(review);
+    } catch (error) {
+      setAiReview(null);
+      setAiReviewError(error instanceof Error ? error.message : 'AI review failed.');
+    } finally {
+      setAiReviewLoading(false);
+    }
   }
 
   async function pickVoicemail() {
@@ -294,6 +636,9 @@ export default function App() {
 
     if (!result.canceled) {
       setVoicemailFile(result.assets[0].name);
+      setVoicemailUri(result.assets[0].uri);
+      setVoicemailMimeType(result.assets[0].mimeType ?? 'audio/mpeg');
+      setTranscriptionError('');
     }
   }
 
@@ -358,6 +703,12 @@ export default function App() {
     setPracticeIndex((current) => current + 1);
   }
 
+  function restartPractice() {
+    setSelectedPractice(null);
+    setPracticeStats({ correct: 0, answered: 0 });
+    setPracticeIndex(0);
+  }
+
   function onQrScanned(result: BarcodeScanningResult) {
     setQrValue(result.data);
     setScanning(false);
@@ -383,13 +734,13 @@ export default function App() {
             <Shield size={26} color="#FFFFFF" strokeWidth={2.6} />
           </View>
           <View style={styles.brandText}>
-            <Text style={styles.eyebrow}>Project Shield Our Elders</Text>
+            <Text style={styles.eyebrow}>Shield Our Elders</Text>
             <Text style={styles.title}>{screenTitles[screen]}</Text>
           </View>
         </View>
         <View style={styles.privacyPill}>
-          <ShieldCheck size={15} color="#0F766E" />
-          <Text style={styles.privacyText}>Private by default</Text>
+          <ShieldCheck size={15} color="#0B6E69" />
+          <Text style={styles.privacyText}>Check before replying</Text>
         </View>
       </View>
     );
@@ -410,8 +761,8 @@ export default function App() {
           const Icon = item.icon;
           const active = screen === item.screen;
           return (
-            <TouchableOpacity key={item.screen} style={styles.navItem} onPress={() => navigate(item.screen)} activeOpacity={0.75}>
-              <Icon size={21} color={active ? '#0F766E' : '#667085'} strokeWidth={active ? 2.6 : 2.1} />
+            <TouchableOpacity key={item.screen} style={[styles.navItem, active && styles.navItemActive]} onPress={() => navigate(item.screen)} activeOpacity={0.75}>
+              <Icon size={21} color={active ? '#0B6E69' : '#667085'} strokeWidth={active ? 2.6 : 2.1} />
               <Text style={[styles.navLabel, active && styles.navLabelActive]}>{item.label}</Text>
             </TouchableOpacity>
           );
@@ -421,30 +772,25 @@ export default function App() {
   }
 
   function renderHome() {
+    const liveNotice = liveNotices[liveNoticeIndex % liveNotices.length];
+
     return (
       <View style={styles.stack}>
-        <View style={styles.openingGuide}>
-          <View style={styles.guideHeader}>
-            <View style={styles.guideIcon}>
-              <BookOpen size={25} color="#0F766E" strokeWidth={2.7} />
-            </View>
-            <View style={styles.guideTitleWrap}>
-              <Text style={styles.guideEyebrow}>Start here</Text>
-              <Text style={styles.guideTitle}>How to use this app</Text>
-            </View>
-          </View>
-          <View style={styles.guideSteps}>
+        <View style={styles.homeHero}>
+          <Text style={styles.homeHeroLabel}>Start here</Text>
+          <Text style={styles.homeHeroTitle}>Stop first. Then check.</Text>
+          <Text style={styles.homeHeroText}>Use one clear check before you reply, pay, or click.</Text>
+          <View style={styles.briefStepRow}>
             {openingSteps.map((step) => (
-              <View key={step.title} style={styles.guideStep}>
-                <CheckCircle2 size={22} color="#0F766E" strokeWidth={2.7} />
-                <View style={styles.guideStepText}>
-                  <Text style={styles.guideStepTitle}>{step.title}</Text>
-                  {step.detail ? <Text style={styles.guideStepDetail}>{step.detail}</Text> : null}
-                </View>
+              <View key={step.title} style={styles.briefStep}>
+                <CheckCircle2 size={18} color="#0B6E69" strokeWidth={2.7} />
+                <Text style={styles.briefStepText}>{step.title}</Text>
               </View>
             ))}
           </View>
         </View>
+
+        <LiveNoticeCard notice={liveNotice} progress={noticeAnim} pulse={urgentPulse} onPress={() => navigate(liveNotice.screen)} />
 
         <TouchableOpacity
           style={styles.emergencyButton}
@@ -457,20 +803,20 @@ export default function App() {
           <Siren size={36} color="#FFFFFF" strokeWidth={2.8} />
           <View style={styles.emergencyTextWrap}>
             <Text style={styles.emergencyTitle}>I THINK THIS IS A SCAM</Text>
-            <Text style={styles.emergencySub}>Tap for immediate steps</Text>
+            <Text style={styles.emergencySub}>Show safety steps</Text>
           </View>
           <ChevronRight size={30} color="#FFFFFF" />
         </TouchableOpacity>
 
         <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>Choose one</Text>
+          <Text style={styles.sectionTitle}>What happened?</Text>
           <TouchableOpacity style={styles.textLinkButton} onPress={() => navigate('tools')}>
-            <Text style={styles.inlineLink}>All tools</Text>
+            <Text style={styles.inlineLink}>More</Text>
           </TouchableOpacity>
         </View>
-        <View style={styles.actionList}>
-          {homePrimaryActions.map((tool) => (
-            <HomeActionButton key={tool.screen} {...tool} onPress={() => navigate(tool.screen)} />
+        <View style={styles.homeActionGroup}>
+          {homePrimaryActions.map((tool, index) => (
+            <HomeActionButton key={tool.screen} {...tool} last={index === homePrimaryActions.length - 1} onPress={() => navigate(tool.screen)} />
           ))}
         </View>
       </View>
@@ -480,57 +826,144 @@ export default function App() {
   function renderTools() {
     return (
       <View style={styles.stack}>
-        <Text style={styles.screenIntro}>Choose the situation that matches what happened. Each check shows warning signs and the next safe step.</Text>
-        <View style={styles.actionList}>
-          {quickTools.map((tool) => (
-            <ToolButton key={tool.screen} {...tool} onPress={() => navigate(tool.screen)} />
-          ))}
-        </View>
-        <ToolButton screen="news" label="Scam Alerts" detail="Recent warning patterns" icon={Newspaper} onPress={() => navigate('news')} />
+        <Text style={styles.screenIntro}>Pick one check.</Text>
+        {toolGroups.map((group) => (
+          <View key={group.title} style={styles.toolSection}>
+            <Text style={styles.toolSectionTitle}>{group.title}</Text>
+            <View style={styles.toolListGroup}>
+              {group.items.map((tool, index) => (
+                <ToolButton key={tool.screen} {...tool} last={index === group.items.length - 1} onPress={() => navigate(tool.screen)} />
+              ))}
+            </View>
+          </View>
+        ))}
       </View>
     );
   }
 
   function renderScamCheck() {
+    const aiReady = isAiReviewConfigured();
+    const hfReady = isHfSpamCheckConfigured();
+    const ocrReady = isHfOcrConfigured();
+    const transcriptionReady = isHfTranscriptionConfigured();
+    const showLocalFallback = hasScamInput && !hfReady;
+
     return (
       <View style={styles.stack}>
-        <Text style={styles.screenIntro}>Paste message text, attach a screenshot, or add a voicemail transcript. Shield Check lists the warning signs in plain language.</Text>
+        <Text style={styles.screenIntro}>Paste the words. You can also add a screenshot.</Text>
         <TextInput
           style={styles.textArea}
           value={messageText}
-          onChangeText={setMessageText}
+          onChangeText={updateMessageText}
           multiline
           textAlignVertical="top"
-          placeholder="Paste the suspicious text, email, or social media message here."
+          placeholder="Paste message here"
           placeholderTextColor="#8A94A6"
         />
         <View style={styles.buttonRow}>
-          <SecondaryAction icon={Upload} label="Upload screenshot" onPress={pickScreenshot} />
-          <SecondaryAction icon={FileAudio} label="Voicemail file" onPress={pickVoicemail} />
+          <SecondaryAction icon={Upload} label="Add screenshot" onPress={pickScreenshot} />
+          <SecondaryAction icon={FileAudio} label="Add file" onPress={pickVoicemail} />
+          <SecondaryAction
+            icon={X}
+            label="Clear"
+            onPress={clearMessageCheck}
+            disabled={!messageText && !voicemailTranscript && !screenshotUri && !voicemailFile}
+          />
         </View>
         {screenshotUri ? (
           <View style={styles.attachment}>
             <Image source={{ uri: screenshotUri }} style={styles.attachmentImage as ImageStyle} />
             <View style={styles.attachmentText}>
               <Text style={styles.attachmentTitle}>Screenshot attached</Text>
-              <Text style={styles.smallMuted}>Paste visible text so Shield Check can review the words.</Text>
+              <Text style={styles.smallMuted}>{screenshotBase64 ? 'Ready for AI review.' : 'Screenshot saved here.'}</Text>
             </View>
-            <TouchableOpacity onPress={() => setScreenshotUri('')}>
+            <TouchableOpacity
+              onPress={() => {
+                setScreenshotUri('');
+                setScreenshotBase64('');
+                setAiReview(null);
+                setAiReviewError('');
+                setOcrText('');
+                setOcrError('');
+              }}
+            >
               <X size={22} color="#667085" />
             </TouchableOpacity>
           </View>
         ) : null}
-        {voicemailFile ? <AttachmentLabel icon={FileAudio} label={voicemailFile} onClear={() => setVoicemailFile('')} /> : null}
+        {voicemailFile ? (
+          <AttachmentLabel
+            icon={FileAudio}
+            label={voicemailFile}
+            onClear={() => {
+              setVoicemailFile('');
+              setVoicemailUri('');
+              setVoicemailMimeType('');
+              setTranscriptionError('');
+            }}
+          />
+        ) : null}
         <TextInput
           style={styles.textAreaSmall}
           value={voicemailTranscript}
-          onChangeText={setVoicemailTranscript}
+          onChangeText={updateVoicemailTranscript}
           multiline
           textAlignVertical="top"
           placeholder="Optional: paste a voicemail transcript here."
           placeholderTextColor="#8A94A6"
         />
-        <RiskPanel result={scamResult} />
+        {screenshotBase64 ? (
+          <View style={styles.aiActionBox}>
+            <SecondaryAction
+              icon={Search}
+              label={ocrLoading ? 'Reading...' : 'Read screenshot'}
+              onPress={runScreenshotOcr}
+              disabled={ocrLoading || !ocrReady}
+            />
+            {!ocrReady ? <Text style={styles.smallMuted}>Screenshot reading is off. Add a Hugging Face key to turn it on.</Text> : null}
+            {ocrError ? <Text style={styles.errorText}>{ocrError}</Text> : null}
+          </View>
+        ) : null}
+        {ocrText ? <ExtractedTextPanel title="Text from screenshot" text={ocrText} /> : null}
+        {voicemailUri ? (
+          <View style={styles.aiActionBox}>
+            <SecondaryAction
+              icon={Mic}
+              label={transcriptionLoading ? 'Transcribing...' : 'Transcribe file'}
+              onPress={runAudioTranscription}
+              disabled={transcriptionLoading || !transcriptionReady}
+            />
+            {!transcriptionReady ? <Text style={styles.smallMuted}>Audio transcription is off. Add a Hugging Face key to turn it on.</Text> : null}
+            {transcriptionError ? <Text style={styles.errorText}>{transcriptionError}</Text> : null}
+          </View>
+        ) : null}
+        <View style={styles.aiActionBox}>
+          <SecondaryAction
+            icon={ShieldAlert}
+            label={hfSpamLoading ? 'Checking...' : 'SMS spam check'}
+            onPress={runHfSpamCheck}
+            disabled={!hasHfTextInput || hfSpamLoading || !hfReady}
+          />
+          {!hfReady && hasHfTextInput ? <Text style={styles.smallMuted}>SMS spam check is off. Add a Hugging Face key to turn it on.</Text> : null}
+          {!hasHfTextInput && screenshotBase64 ? <Text style={styles.smallMuted}>The SMS model reads pasted words, not screenshots.</Text> : null}
+          {hfSpamNotice ? <Text style={styles.smallMuted}>{hfSpamNotice}</Text> : null}
+          {hfSpamError ? <Text style={styles.errorText}>{hfSpamError}</Text> : null}
+        </View>
+        {hfSpamReview ? <SpamModelPanel review={hfSpamReview} /> : null}
+        {aiReady ? (
+          <View style={styles.aiActionBox}>
+          <SecondaryAction
+            icon={ShieldCheck}
+              label={aiReviewLoading ? 'Reading...' : 'Screenshot review'}
+            onPress={runAiReview}
+              disabled={!screenshotBase64 || aiReviewLoading || !aiReady}
+          />
+            {!aiReady && screenshotBase64 ? <Text style={styles.smallMuted}>Screenshot reading is off. Paste the visible words to check them.</Text> : null}
+          {aiReviewError ? <Text style={styles.errorText}>{aiReviewError}</Text> : null}
+        </View>
+        ) : null}
+        {aiReview ? <AiReviewPanel review={aiReview} /> : null}
+        {showLocalFallback ? <RiskPanel result={scamResult} /> : null}
       </View>
     );
   }
@@ -538,14 +971,15 @@ export default function App() {
   function renderCallCheck() {
     return (
       <View style={styles.stack}>
-        <Text style={styles.screenIntro}>Answer what happened on the call. If any answer is yes, slow down and verify before acting.</Text>
-        <ToggleRow label="Did they ask for money?" value={callAnswers.money} onValueChange={(value) => setCallAnswers({ ...callAnswers, money: value })} />
-        <ToggleRow label="Did they ask you not to tell anyone?" value={callAnswers.secret} onValueChange={(value) => setCallAnswers({ ...callAnswers, secret: value })} />
-        <ToggleRow label="Did they ask for a verification code?" value={callAnswers.code} onValueChange={(value) => setCallAnswers({ ...callAnswers, code: value })} />
-        <ToggleRow label="Did they ask for remote access?" value={callAnswers.remote} onValueChange={(value) => setCallAnswers({ ...callAnswers, remote: value })} />
-        <ToggleRow label="Did they threaten arrest or account closure?" value={callAnswers.threat} onValueChange={(value) => setCallAnswers({ ...callAnswers, threat: value })} />
-        <ToggleRow label="Are you relying only on caller ID?" value={callAnswers.callerId} onValueChange={(value) => setCallAnswers({ ...callAnswers, callerId: value })} />
-        <RiskPanel result={callResult} />
+        <Text style={styles.screenIntro}>Answer yes or no.</Text>
+        <ToggleRow label="Asked for money?" value={callAnswers.money} onValueChange={(value) => setCallAnswers({ ...callAnswers, money: value })} />
+        <ToggleRow label="Said not to tell anyone?" value={callAnswers.secret} onValueChange={(value) => setCallAnswers({ ...callAnswers, secret: value })} />
+        <ToggleRow label="Asked for a code?" value={callAnswers.code} onValueChange={(value) => setCallAnswers({ ...callAnswers, code: value })} />
+        <ToggleRow label="Asked to control your device?" value={callAnswers.remote} onValueChange={(value) => setCallAnswers({ ...callAnswers, remote: value })} />
+        <ToggleRow label="Threatened arrest or account closing?" value={callAnswers.threat} onValueChange={(value) => setCallAnswers({ ...callAnswers, threat: value })} />
+        <ToggleRow label="Trusting caller ID only?" value={callAnswers.callerId} onValueChange={(value) => setCallAnswers({ ...callAnswers, callerId: value })} />
+        <SecondaryAction icon={X} label="Clear answers" onPress={() => setCallAnswers(initialCallAnswers)} disabled={!hasCallAnswers} />
+        {hasCallAnswers ? <RiskPanel result={callResult} /> : null}
         <TrustedContactStrip contacts={contacts} onCall={callContact} onText={textContact} />
       </View>
     );
@@ -557,7 +991,7 @@ export default function App() {
         <View style={styles.stopPanel}>
           <Siren size={42} color="#B42318" strokeWidth={2.8} />
           <Text style={styles.stopTitle}>Stop. You have time.</Text>
-          <Text style={styles.stopText}>Scammers rush people. A real bank, agency, or family member can wait while you verify.</Text>
+          <Text style={styles.stopText}>A real bank, agency, or family member can wait.</Text>
         </View>
         {emergencySteps.map((step, index) => (
           <View key={step} style={styles.stepRow}>
@@ -579,7 +1013,7 @@ export default function App() {
   function renderContacts() {
     return (
       <View style={styles.stack}>
-        <Text style={styles.screenIntro}>Store one or two people to call before sending money, sharing codes, or opening links. Contacts stay on this device.</Text>
+        <Text style={styles.screenIntro}>Save up to two people you trust.</Text>
         {contactDrafts.map((contact, index) => (
           <View style={styles.card} key={contact.id}>
             <Text style={styles.cardTitle}>{contact.label}</Text>
@@ -611,7 +1045,7 @@ export default function App() {
         ))}
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Family Verification Phrase</Text>
-          <Text style={styles.cardBody}>Use this for family emergency or voice-clone calls. Do not make it public.</Text>
+          <Text style={styles.cardBody}>Use this for family emergency calls. Keep it private.</Text>
           <TextInput
             style={styles.input}
             value={familyPhrase}
@@ -631,7 +1065,7 @@ export default function App() {
   function renderLinkCheck() {
     return (
       <View style={styles.stack}>
-        <Text style={styles.screenIntro}>Paste a link before opening it. This checks domain tricks, shorteners, non-HTTPS links, and fake brand names.</Text>
+        <Text style={styles.screenIntro}>Paste a link before opening it.</Text>
         <TextInput
           style={styles.input}
           value={urlText}
@@ -641,10 +1075,15 @@ export default function App() {
           placeholder="https://example.com"
           placeholderTextColor="#8A94A6"
         />
-        <RiskPanel result={linkResult} />
-        <TouchableOpacity style={styles.secondaryButtonWide} onPress={() => openUrl(urlText)}>
-          <ExternalLink size={20} color="#0F766E" />
-          <Text style={styles.secondaryButtonWideText}>Open destination only if expected</Text>
+        {hasUrlInput ? <RiskPanel result={linkResult} /> : null}
+        <SecondaryAction icon={X} label="Clear" onPress={() => setUrlText('')} disabled={!hasUrlInput} />
+        <TouchableOpacity
+          style={[styles.secondaryButtonWide, !hasUrlInput && styles.disabledButton]}
+          onPress={() => openUrl(urlText)}
+          disabled={!hasUrlInput}
+        >
+          <ExternalLink size={20} color={hasUrlInput ? '#0B6E69' : '#98A2B3'} />
+          <Text style={[styles.secondaryButtonWideText, !hasUrlInput && styles.disabledText]}>Open only if expected</Text>
         </TouchableOpacity>
       </View>
     );
@@ -655,11 +1094,11 @@ export default function App() {
 
     return (
       <View style={styles.stack}>
-        <Text style={styles.screenIntro}>Scan a QR code to see the destination first. The app warns before opening unknown or suspicious links.</Text>
+        <Text style={styles.screenIntro}>Scan first. Open only after checking.</Text>
         {!canScan ? (
           <TouchableOpacity style={styles.primaryButton} onPress={requestCameraPermission}>
             <Camera size={20} color="#FFFFFF" />
-            <Text style={styles.primaryButtonText}>Allow camera for QR scan</Text>
+          <Text style={styles.primaryButtonText}>Allow camera for QR scan</Text>
           </TouchableOpacity>
         ) : null}
         {canScan && scanning ? (
@@ -684,13 +1123,18 @@ export default function App() {
           onChangeText={setQrValue}
           autoCapitalize="none"
           autoCorrect={false}
-          placeholder="Scanned QR destination appears here"
+          placeholder="QR destination appears here"
           placeholderTextColor="#8A94A6"
         />
-        <RiskPanel result={qrResult} />
-        <TouchableOpacity style={styles.secondaryButtonWide} onPress={() => openUrl(qrValue)} disabled={!qrValue.trim()}>
-          <ExternalLink size={20} color="#0F766E" />
-          <Text style={styles.secondaryButtonWideText}>Open destination only if verified</Text>
+        {hasQrInput ? <RiskPanel result={qrResult} /> : null}
+        <SecondaryAction icon={X} label="Clear" onPress={() => setQrValue('')} disabled={!hasQrInput} />
+        <TouchableOpacity
+          style={[styles.secondaryButtonWide, !hasQrInput && styles.disabledButton]}
+          onPress={() => openUrl(qrValue)}
+          disabled={!hasQrInput}
+        >
+          <ExternalLink size={20} color={hasQrInput ? '#0B6E69' : '#98A2B3'} />
+          <Text style={[styles.secondaryButtonWideText, !hasQrInput && styles.disabledText]}>Open only if verified</Text>
         </TouchableOpacity>
       </View>
     );
@@ -699,11 +1143,11 @@ export default function App() {
   function renderVoiceClone() {
     return (
       <View style={styles.stack}>
-        <Text style={styles.screenIntro}>Use this when a voice claims to be family or a caregiver. The safest check is a private phrase and a call-back.</Text>
-        <ToggleRow label="Are they claiming to be family?" value={voiceAnswers.family} onValueChange={(value) => setVoiceAnswers({ ...voiceAnswers, family: value })} />
-        <ToggleRow label="Are they asking for money immediately?" value={voiceAnswers.money} onValueChange={(value) => setVoiceAnswers({ ...voiceAnswers, money: value })} />
-        <ToggleRow label="Are they saying not to tell anyone?" value={voiceAnswers.secret} onValueChange={(value) => setVoiceAnswers({ ...voiceAnswers, secret: value })} />
-        <ToggleRow label="Does the story feel shocking or emotional?" value={voiceAnswers.emotional} onValueChange={(value) => setVoiceAnswers({ ...voiceAnswers, emotional: value })} />
+        <Text style={styles.screenIntro}>Use this when a caller sounds like family.</Text>
+        <ToggleRow label="Says they are family?" value={voiceAnswers.family} onValueChange={(value) => setVoiceAnswers({ ...voiceAnswers, family: value })} />
+        <ToggleRow label="Needs money now?" value={voiceAnswers.money} onValueChange={(value) => setVoiceAnswers({ ...voiceAnswers, money: value })} />
+        <ToggleRow label="Says keep it secret?" value={voiceAnswers.secret} onValueChange={(value) => setVoiceAnswers({ ...voiceAnswers, secret: value })} />
+        <ToggleRow label="Story feels shocking?" value={voiceAnswers.emotional} onValueChange={(value) => setVoiceAnswers({ ...voiceAnswers, emotional: value })} />
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Verification phrase</Text>
           <TextInput
@@ -715,7 +1159,8 @@ export default function App() {
           />
           <SecondaryAction icon={ShieldCheck} label="Save phrase" onPress={savePhrase} />
         </View>
-        <RiskPanel result={voiceResult} />
+        <SecondaryAction icon={X} label="Clear answers" onPress={() => setVoiceAnswers(initialVoiceAnswers)} disabled={!hasVoiceAnswers} />
+        {hasVoiceAnswers ? <RiskPanel result={voiceResult} /> : null}
       </View>
     );
   }
@@ -733,11 +1178,12 @@ export default function App() {
 
     return (
       <View style={styles.stack}>
-        <Text style={styles.screenIntro}>Before sending money, choose every payment method they mentioned. Some methods are common in scams because they are hard to reverse.</Text>
+        <Text style={styles.screenIntro}>Choose the payment they asked for.</Text>
         {Object.entries(labels).map(([key, label]) => (
           <ToggleRow key={key} label={label} value={paymentAnswers[key]} onValueChange={(value) => setPaymentAnswers({ ...paymentAnswers, [key]: value })} />
         ))}
-        <RiskPanel result={paymentResult} />
+        <SecondaryAction icon={X} label="Clear answers" onPress={() => setPaymentAnswers(initialPayments)} disabled={!hasPaymentAnswers} />
+        {hasPaymentAnswers ? <RiskPanel result={paymentResult} /> : null}
       </View>
     );
   }
@@ -746,9 +1192,9 @@ export default function App() {
     return (
       <View style={styles.stack}>
         <View style={styles.sectionHeader}>
-          <Text style={styles.screenIntroNarrow}>Recent scam patterns from public safety sources and Project Shield workshop notes.</Text>
+          <Text style={styles.screenIntroNarrow}>Current warnings from public safety sources.</Text>
           <TouchableOpacity style={styles.refreshButton} onPress={refreshAlerts}>
-            <Newspaper size={18} color="#0F766E" />
+            <Newspaper size={18} color="#0B6E69" />
             <Text style={styles.refreshText}>Refresh</Text>
           </TouchableOpacity>
         </View>
@@ -769,7 +1215,7 @@ export default function App() {
   function renderLearn() {
     return (
       <View style={styles.stack}>
-        <Text style={styles.screenIntro}>Short one-minute lessons. Open one, read the steps, then practice with examples.</Text>
+        <Text style={styles.screenIntro}>Short lessons. Open one at a time.</Text>
         {lessons.map((lesson) => {
           const open = lessonOpen === lesson.id;
           return (
@@ -779,14 +1225,14 @@ export default function App() {
                   <Text style={styles.lessonTitle}>{lesson.title}</Text>
                   <Text style={styles.smallMuted}>{lesson.minutes} minute lesson</Text>
                 </View>
-                <GraduationCap size={24} color="#7C3AED" />
+                <GraduationCap size={24} color="#245B8C" />
               </View>
               <Text style={styles.cardBody}>{lesson.summary}</Text>
               {open ? (
                 <View style={styles.lessonBody}>
                   {lesson.steps.map((step) => (
                     <View key={step} style={styles.bulletRow}>
-                      <CheckCircle2 size={19} color="#0F766E" />
+                      <CheckCircle2 size={19} color="#0B6E69" />
                       <Text style={styles.bulletText}>{step}</Text>
                     </View>
                   ))}
@@ -811,9 +1257,14 @@ export default function App() {
     return (
       <View style={styles.stack}>
         <View style={styles.confidencePanel}>
-          <Text style={styles.metricLabel}>Practice progress</Text>
-          <Text style={styles.metricValue}>{latestConfidence}%</Text>
-          <ProgressBar value={latestConfidence} />
+          <View style={styles.metricTopRow}>
+            <Text style={styles.metricLabel}>Question {practiceNumber} of {practiceExamples.length}</Text>
+            <Text style={styles.metricSmall}>
+              {practiceStats.answered ? `${practiceStats.correct}/${practiceStats.answered} correct` : storedConfidence ? 'Last score' : 'Start quiz'}
+            </Text>
+          </View>
+          <Text style={styles.metricValue}>{quizScore}%</Text>
+          <ProgressBar value={quizScore} />
         </View>
         <View style={styles.practiceCard}>
           <Text style={styles.newsSource}>{practice.channel}</Text>
@@ -823,22 +1274,32 @@ export default function App() {
           {options.map((option) => {
             const isSelected = selectedPractice === option;
             const isCorrect = answered && practice.answer === option;
+            const isWrong = answered && isSelected && practice.answer !== option;
             return (
               <TouchableOpacity
                 key={option}
-                style={[styles.answerButton, isSelected && styles.answerSelected, isCorrect && styles.answerCorrect]}
+                style={[styles.answerButton, isSelected && styles.answerSelected, isCorrect && styles.answerCorrect, isWrong && styles.answerWrong]}
                 onPress={() => choosePractice(option)}
                 activeOpacity={0.78}
+                disabled={answered}
               >
-                {isCorrect ? <CheckCircle2 size={21} color="#0F766E" /> : <Circle size={21} color={isSelected ? '#7C3AED' : '#667085'} />}
-                <Text style={styles.answerText}>{option[0].toUpperCase() + option.slice(1)}</Text>
+                {isCorrect ? (
+                  <CheckCircle2 size={21} color="#0B6E69" />
+                ) : isWrong ? (
+                  <X size={21} color="#B42318" />
+                ) : (
+                  <Circle size={21} color={isSelected ? '#245B8C' : '#667085'} />
+                )}
+                <Text style={styles.answerText}>{option === 'safe' ? 'Safe' : option === 'suspicious' ? 'Not sure' : 'Scam'}</Text>
               </TouchableOpacity>
             );
           })}
         </View>
         {answered ? (
           <View style={styles.feedbackPanel}>
-            <Text style={styles.feedbackTitle}>{selectedPractice === practice.answer ? 'Correct' : `Answer: ${practice.answer}`}</Text>
+            <Text style={[styles.feedbackTitle, selectedPractice !== practice.answer && styles.feedbackWrong]}>
+              {selectedPractice === practice.answer ? 'Correct' : `Answer: ${practice.answer === 'suspicious' ? 'not sure' : practice.answer}`}
+            </Text>
             <Text style={styles.cardBody}>{practice.explanation}</Text>
             {practice.redFlags.map((flag) => (
               <View key={flag} style={styles.bulletRow}>
@@ -850,6 +1311,7 @@ export default function App() {
               <ChevronRight size={20} color="#FFFFFF" />
               <Text style={styles.primaryButtonText}>Next example</Text>
             </TouchableOpacity>
+            <SecondaryAction icon={X} label="Restart quiz" onPress={restartPractice} />
           </View>
         ) : null}
       </View>
@@ -859,13 +1321,13 @@ export default function App() {
   function renderRecovery() {
     return (
       <View style={styles.stack}>
-        <Text style={styles.screenIntro}>If someone already clicked, paid, shared a code, or gave remote access, act quickly and document everything.</Text>
+        <Text style={styles.screenIntro}>If anything was shared or paid, start here.</Text>
         {recoverySteps.map((group) => (
           <View key={group.title} style={styles.card}>
             <Text style={styles.cardTitle}>{group.title}</Text>
             {group.items.map((item) => (
               <View key={item} style={styles.bulletRow}>
-                <CheckCircle2 size={19} color="#0F766E" />
+                <CheckCircle2 size={19} color="#0B6E69" />
                 <Text style={styles.bulletText}>{item}</Text>
               </View>
             ))}
@@ -876,7 +1338,7 @@ export default function App() {
           <Text style={styles.primaryButtonText}>Report fraud to FTC</Text>
         </TouchableOpacity>
         <TouchableOpacity style={styles.secondaryButtonWide} onPress={() => Linking.openURL('https://www.ic3.gov/')}>
-          <ExternalLink size={20} color="#0F766E" />
+          <ExternalLink size={20} color="#0B6E69" />
           <Text style={styles.secondaryButtonWideText}>Report internet fraud to IC3</Text>
         </TouchableOpacity>
       </View>
@@ -886,7 +1348,7 @@ export default function App() {
   function renderPhoneLookup() {
     return (
       <View style={styles.stack}>
-        <Text style={styles.screenIntro}>Paste a phone number. Local checks can identify a few public numbers and warning patterns; unknown still means verify independently.</Text>
+        <Text style={styles.screenIntro}>Paste a number. Unknown numbers still need checking.</Text>
         <TextInput
           style={styles.input}
           value={phoneNumber}
@@ -895,10 +1357,15 @@ export default function App() {
           placeholder="Phone number"
           placeholderTextColor="#8A94A6"
         />
-        <RiskPanel result={phoneResult} />
-        <TouchableOpacity style={styles.secondaryButtonWide} onPress={openSearchForPhone} disabled={!phoneNumber.trim()}>
-          <Search size={20} color="#0F766E" />
-          <Text style={styles.secondaryButtonWideText}>Search public scam reports</Text>
+        {hasPhoneInput ? <RiskPanel result={phoneResult} /> : null}
+        <SecondaryAction icon={X} label="Clear" onPress={() => setPhoneNumber('')} disabled={!hasPhoneInput} />
+        <TouchableOpacity
+          style={[styles.secondaryButtonWide, !hasPhoneInput && styles.disabledButton]}
+          onPress={openSearchForPhone}
+          disabled={!hasPhoneInput}
+        >
+          <Search size={20} color={hasPhoneInput ? '#0B6E69' : '#98A2B3'} />
+          <Text style={[styles.secondaryButtonWideText, !hasPhoneInput && styles.disabledText]}>Search public scam reports</Text>
         </TouchableOpacity>
       </View>
     );
@@ -906,24 +1373,60 @@ export default function App() {
 
   function renderVoicemail() {
     const voicemailResult = analyzeMessage(voicemailTranscript, 'voicemail transcript');
+    const transcriptionReady = isHfTranscriptionConfigured();
     return (
       <View style={styles.stack}>
-        <Text style={styles.screenIntro}>Upload a voicemail file for the case record, then paste or type the transcript. The app highlights urgency, threats, gift cards, crypto, remote access, and code requests.</Text>
+        <Text style={styles.screenIntro}>Upload a voicemail. The app can transcribe it.</Text>
         <TouchableOpacity style={styles.primaryButton} onPress={pickVoicemail}>
           <FileAudio size={20} color="#FFFFFF" />
           <Text style={styles.primaryButtonText}>Upload voicemail</Text>
         </TouchableOpacity>
-        {voicemailFile ? <AttachmentLabel icon={FileAudio} label={voicemailFile} onClear={() => setVoicemailFile('')} /> : null}
+        {voicemailFile ? (
+          <AttachmentLabel
+            icon={FileAudio}
+            label={voicemailFile}
+            onClear={() => {
+              setVoicemailFile('');
+              setVoicemailUri('');
+              setVoicemailMimeType('');
+              setTranscriptionError('');
+            }}
+          />
+        ) : null}
+        {voicemailUri ? (
+          <View style={styles.aiActionBox}>
+            <SecondaryAction
+              icon={Mic}
+              label={transcriptionLoading ? 'Transcribing...' : 'Transcribe file'}
+              onPress={runAudioTranscription}
+              disabled={transcriptionLoading || !transcriptionReady}
+            />
+            {!transcriptionReady ? <Text style={styles.smallMuted}>Audio transcription is off. Add a Hugging Face key to turn it on.</Text> : null}
+            {transcriptionError ? <Text style={styles.errorText}>{transcriptionError}</Text> : null}
+          </View>
+        ) : null}
         <TextInput
           style={styles.textArea}
           value={voicemailTranscript}
-          onChangeText={setVoicemailTranscript}
+          onChangeText={updateVoicemailTranscript}
           multiline
           textAlignVertical="top"
           placeholder="Paste voicemail transcript here."
           placeholderTextColor="#8A94A6"
         />
-        <RiskPanel result={voicemailResult} />
+        <SecondaryAction
+          icon={X}
+          label="Clear"
+          onPress={() => {
+            setVoicemailTranscript('');
+            setVoicemailFile('');
+            setVoicemailUri('');
+            setVoicemailMimeType('');
+            setTranscriptionError('');
+          }}
+          disabled={!voicemailTranscript && !voicemailFile}
+        />
+        {hasVoicemailInput ? <RiskPanel result={voicemailResult} /> : null}
       </View>
     );
   }
@@ -969,20 +1472,37 @@ export default function App() {
     <KeyboardAvoidingView style={styles.app} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <StatusBar style="dark" />
       {renderHeader()}
-      <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
-        {screen !== 'home' ? (
-          <TouchableOpacity style={styles.backButton} onPress={() => navigate('home')}>
-            <ChevronRight size={18} color="#0F766E" style={styles.backIcon} />
-            <Text style={styles.backText}>Home</Text>
-          </TouchableOpacity>
-        ) : null}
-        {renderScreen()}
+      <ScrollView ref={scrollRef} style={styles.scroll} contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
+        <Animated.View
+          style={[
+            styles.screenTransition,
+            {
+              opacity: screenAnim,
+              transform: [
+                {
+                  translateY: screenAnim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [12, 0],
+                  }),
+                },
+              ],
+            },
+          ]}
+        >
+          {screen !== 'home' ? (
+            <TouchableOpacity style={styles.backButton} onPress={() => navigate('home')}>
+              <ChevronRight size={18} color="#0B6E69" style={styles.backIcon} />
+              <Text style={styles.backText}>Home</Text>
+            </TouchableOpacity>
+          ) : null}
+          {renderScreen()}
+        </Animated.View>
       </ScrollView>
       {renderBottomNav()}
       <Modal visible={emergencyVisible && screen === 'emergency'} animationType="slide" onRequestClose={() => setEmergencyVisible(false)}>
         <View style={styles.modalScreen}>
           <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>Immediate Scam Safety</Text>
+            <Text style={styles.modalTitle}>Scam Safety Steps</Text>
             <Pressable style={styles.closeButton} onPress={() => setEmergencyVisible(false)}>
               <X size={24} color="#17212B" />
             </Pressable>
@@ -1000,17 +1520,19 @@ function HomeActionButton({
   icon: Icon,
   onPress,
   tone,
+  last,
 }: {
   label: string;
   detail: string;
   icon: LucideIcon;
   onPress: () => void;
   tone?: RiskLevel;
+  last?: boolean;
 }) {
-  const color = tone ? getLevelColor(tone) : '#0F766E';
+  const color = tone ? getLevelColor(tone) : '#0B6E69';
   return (
-    <TouchableOpacity style={styles.homeActionButton} onPress={onPress} activeOpacity={0.75}>
-      <View style={[styles.homeActionIcon, { backgroundColor: tone ? levelBackground(tone) : '#E7F7F4' }]}>
+    <Pressable style={({ pressed }) => [styles.homeActionButton, !last && styles.homeActionDivider, pressed && styles.pressedRow]} onPress={onPress}>
+      <View style={[styles.homeActionIcon, { backgroundColor: tone ? levelBackground(tone) : '#E7F4F1' }]}>
         <Icon size={30} color={color} strokeWidth={2.6} />
       </View>
       <View style={styles.homeActionText}>
@@ -1018,7 +1540,7 @@ function HomeActionButton({
         <Text style={styles.homeActionDetail}>{detail}</Text>
       </View>
       <ChevronRight size={30} color={color} strokeWidth={2.7} />
-    </TouchableOpacity>
+    </Pressable>
   );
 }
 
@@ -1028,6 +1550,7 @@ function ToolButton({
   icon: Icon,
   onPress,
   tone,
+  last,
 }: {
   screen?: Screen;
   label: string;
@@ -1035,11 +1558,12 @@ function ToolButton({
   icon: LucideIcon;
   onPress: () => void;
   tone?: RiskLevel;
+  last?: boolean;
 }) {
-  const color = tone ? getLevelColor(tone) : '#0F766E';
+  const color = tone ? getLevelColor(tone) : '#0B6E69';
   return (
-    <TouchableOpacity style={styles.toolButton} onPress={onPress} activeOpacity={0.75}>
-      <View style={[styles.toolIcon, { backgroundColor: tone ? levelBackground(tone) : '#E7F7F4' }]}>
+    <Pressable style={({ pressed }) => [styles.toolButton, !last && styles.homeActionDivider, pressed && styles.pressedRow]} onPress={onPress}>
+      <View style={[styles.toolIcon, { backgroundColor: tone ? levelBackground(tone) : '#E7F4F1' }]}>
         <Icon size={28} color={color} strokeWidth={2.45} />
       </View>
       <View style={styles.toolText}>
@@ -1047,16 +1571,153 @@ function ToolButton({
         <Text style={styles.toolDetail}>{detail}</Text>
       </View>
       <ChevronRight size={26} color={color} strokeWidth={2.6} />
-    </TouchableOpacity>
+    </Pressable>
+  );
+}
+
+function LiveNoticeCard({
+  notice,
+  progress,
+  pulse,
+  onPress,
+}: {
+  notice: LiveNotice;
+  progress: Animated.Value;
+  pulse: Animated.Value;
+  onPress: () => void;
+}) {
+  const Icon = notice.icon;
+  const color = getLevelColor(notice.level);
+  const translateY = progress.interpolate({
+    inputRange: [0, 1],
+    outputRange: [-12, 0],
+  });
+  const pulseScale = pulse.interpolate({
+    inputRange: [0, 1],
+    outputRange: [1, notice.level === 'stop' ? 1.07 : 1],
+  });
+
+  return (
+    <Pressable onPress={onPress} style={({ pressed }) => [pressed && styles.liveNoticePressed]}>
+      <Animated.View style={[styles.liveNotice, { opacity: progress, transform: [{ translateY }] }]}>
+        <View style={styles.liveNoticeTop}>
+          <Text style={styles.liveNoticeKicker}>Live protection</Text>
+          <View style={[styles.liveNoticeBadge, { borderColor: color }]}>
+            <Text style={[styles.liveNoticeBadgeText, { color }]}>{notice.label}</Text>
+          </View>
+        </View>
+        <View style={styles.liveNoticeContent}>
+          <Animated.View
+            style={[
+              styles.liveNoticeIcon,
+              {
+                backgroundColor: levelBackground(notice.level),
+                transform: [{ scale: pulseScale }],
+              },
+            ]}
+          >
+            <Icon size={27} color={color} strokeWidth={2.65} />
+          </Animated.View>
+          <View style={styles.liveNoticeText}>
+            <Text style={styles.liveNoticeTitle}>{notice.title}</Text>
+            <Text style={styles.liveNoticeBody}>{notice.body}</Text>
+          </View>
+          <ChevronRight size={25} color={color} strokeWidth={2.6} />
+        </View>
+      </Animated.View>
+    </Pressable>
+  );
+}
+
+function ExtractedTextPanel({ title, text }: { title: string; text: string }) {
+  return (
+    <View style={styles.scriptBox}>
+      <Text style={styles.scriptLabel}>{title}</Text>
+      <Text style={styles.scriptText}>{text}</Text>
+    </View>
+  );
+}
+
+function SpamModelPanel({ review }: { review: HfSpamReview }) {
+  const color = getLevelColor(review.level);
+
+  return (
+    <View style={[styles.aiPanel, { backgroundColor: levelBackground(review.level), borderColor: color }]}>
+      <View style={styles.riskTop}>
+        <View style={styles.riskTextColumn}>
+          <Text style={[styles.riskLabel, { color }]}>SMS spam check</Text>
+          <Text style={styles.riskHeadline}>{review.headline}</Text>
+        </View>
+        <View style={[styles.scoreBadge, { borderColor: color }]}>
+          <Text style={[styles.scoreText, { color }]}>{review.score}</Text>
+        </View>
+      </View>
+      <Text style={styles.cardBody}>{review.summary}</Text>
+      <Text style={styles.nextTitle}>Why it was flagged</Text>
+      {review.reasons.map((reason) => (
+        <View key={reason} style={styles.bulletRow}>
+          <AlertTriangle size={18} color={color} />
+          <Text style={styles.bulletText}>{reason}</Text>
+        </View>
+      ))}
+      <Text style={styles.nextTitle}>Do next</Text>
+      {review.nextSteps.map((step) => (
+        <View key={step} style={styles.bulletRow}>
+          <CheckCircle2 size={19} color="#0B6E69" />
+          <Text style={styles.bulletText}>{step}</Text>
+        </View>
+      ))}
+    </View>
+  );
+}
+
+function AiReviewPanel({ review }: { review: AiScamReview }) {
+  const color = getLevelColor(review.level);
+
+  return (
+    <View style={[styles.aiPanel, { backgroundColor: levelBackground(review.level), borderColor: color }]}>
+      <View style={styles.riskTop}>
+        <View style={styles.riskTextColumn}>
+          <Text style={[styles.riskLabel, { color }]}>AI review</Text>
+          <Text style={styles.riskHeadline}>{review.headline}</Text>
+        </View>
+        <View style={[styles.scoreBadge, { borderColor: color }]}>
+          <Text style={[styles.scoreText, { color }]}>{review.score}</Text>
+        </View>
+      </View>
+      <Text style={styles.cardBody}>{review.summary}</Text>
+      {review.screenshotText ? (
+        <View style={styles.scriptBox}>
+          <Text style={styles.scriptLabel}>Read from screenshot</Text>
+          <Text style={styles.scriptText}>{review.screenshotText}</Text>
+        </View>
+      ) : null}
+      <Text style={styles.nextTitle}>Why it was flagged</Text>
+      {review.reasons.map((reason) => (
+        <View key={reason} style={styles.bulletRow}>
+          <AlertTriangle size={18} color={color} />
+          <Text style={styles.bulletText}>{reason}</Text>
+        </View>
+      ))}
+      <Text style={styles.nextTitle}>Do next</Text>
+      {review.nextSteps.map((step) => (
+        <View key={step} style={styles.bulletRow}>
+          <CheckCircle2 size={19} color="#0B6E69" />
+          <Text style={styles.bulletText}>{step}</Text>
+        </View>
+      ))}
+    </View>
   );
 }
 
 function RiskPanel({ result }: { result: AnalysisResult }) {
   const color = getLevelColor(result.level);
+  const visibleFindings = [...result.findings].sort((left, right) => right.points - left.points).slice(0, 3);
+  const hiddenFindingCount = Math.max(0, result.findings.length - visibleFindings.length);
   return (
     <View style={[styles.riskPanel, { backgroundColor: levelBackground(result.level), borderColor: color }]}>
       <View style={styles.riskTop}>
-        <View>
+        <View style={styles.riskTextColumn}>
           <Text style={[styles.riskLabel, { color }]}>{labelForLevel(result.level)}</Text>
           <Text style={styles.riskHeadline}>{result.headline}</Text>
         </View>
@@ -1067,7 +1728,8 @@ function RiskPanel({ result }: { result: AnalysisResult }) {
       <Text style={styles.cardBody}>{result.summary}</Text>
       {result.findings.length ? (
         <View style={styles.findings}>
-          {result.findings.map((finding) => (
+          <Text style={styles.nextTitle}>Main signs</Text>
+          {visibleFindings.map((finding) => (
             <View key={finding.id} style={styles.findingRow}>
               <AlertTriangle size={19} color={getLevelColor(finding.severity)} />
               <View style={styles.findingText}>
@@ -1076,16 +1738,17 @@ function RiskPanel({ result }: { result: AnalysisResult }) {
               </View>
             </View>
           ))}
+          {hiddenFindingCount ? <Text style={styles.smallMuted}>Plus {hiddenFindingCount} more sign{hiddenFindingCount === 1 ? '' : 's'}.</Text> : null}
         </View>
       ) : null}
       <View style={styles.scriptBox}>
-        <Text style={styles.scriptLabel}>Say this</Text>
+        <Text style={styles.scriptLabel}>Say this if pressured</Text>
         <Text style={styles.scriptText}>{result.script}</Text>
       </View>
-      <Text style={styles.nextTitle}>Next steps</Text>
+      <Text style={styles.nextTitle}>Do next</Text>
       {result.nextSteps.map((step) => (
         <View key={step} style={styles.bulletRow}>
-          <CheckCircle2 size={19} color="#0F766E" />
+          <CheckCircle2 size={19} color="#0B6E69" />
           <Text style={styles.bulletText}>{step}</Text>
         </View>
       ))}
@@ -1100,8 +1763,8 @@ function ToggleRow({ label, value, onValueChange }: { label: string; value: bool
       <Switch
         value={value}
         onValueChange={onValueChange}
-        trackColor={{ false: '#D0D5DD', true: '#99F6E4' }}
-        thumbColor={value ? '#0F766E' : '#F9FAFB'}
+        trackColor={{ false: '#D8DFDA', true: '#BFE3DA' }}
+        thumbColor={value ? '#0B6E69' : '#F9FAFB'}
       />
     </View>
   );
@@ -1120,7 +1783,7 @@ function SecondaryAction({
 }) {
   return (
     <TouchableOpacity style={[styles.secondaryAction, disabled && styles.disabledButton]} onPress={onPress} disabled={disabled} activeOpacity={0.75}>
-      <Icon size={19} color={disabled ? '#98A2B3' : '#0F766E'} />
+      <Icon size={19} color={disabled ? '#98A2B3' : '#0B6E69'} />
       <Text style={[styles.secondaryActionText, disabled && styles.disabledText]}>{label}</Text>
     </TouchableOpacity>
   );
@@ -1130,7 +1793,7 @@ function AttachmentLabel({ icon: Icon, label, onClear }: { icon: LucideIcon; lab
   return (
     <View style={styles.attachment}>
       <View style={styles.toolIcon}>
-        <Icon size={22} color="#0F766E" />
+        <Icon size={22} color="#0B6E69" />
       </View>
       <View style={styles.attachmentText}>
         <Text style={styles.attachmentTitle}>{label}</Text>
@@ -1173,17 +1836,17 @@ function TrustedContactStrip({
         contacts.map((contact) => (
           <View key={contact.id} style={styles.contactRow}>
             <View style={styles.contactAvatar}>
-              <Users size={22} color="#0F766E" />
+              <Users size={22} color="#0B6E69" />
             </View>
             <View style={styles.contactInfo}>
               <Text style={styles.contactName}>{contact.name || contact.label}</Text>
               <Text style={styles.smallMuted}>{contact.phone}</Text>
             </View>
             <TouchableOpacity style={styles.iconButton} onPress={() => onCall(contact)}>
-              <Phone size={21} color="#0F766E" />
+              <Phone size={21} color="#0B6E69" />
             </TouchableOpacity>
             <TouchableOpacity style={styles.iconButton} onPress={() => onText(contact)}>
-              <MessageCircle size={21} color="#0F766E" />
+              <MessageCircle size={21} color="#0B6E69" />
             </TouchableOpacity>
           </View>
         ))
@@ -1197,15 +1860,15 @@ function TrustedContactStrip({
 const styles = StyleSheet.create({
   app: {
     flex: 1,
-    backgroundColor: '#F6F8F6',
+    backgroundColor: '#F4F7F5',
   },
   header: {
-    paddingTop: 56,
-    paddingHorizontal: 18,
-    paddingBottom: 14,
-    backgroundColor: '#FFFFFF',
+    paddingTop: 48,
+    paddingHorizontal: 20,
+    paddingBottom: 12,
+    backgroundColor: '#FEFFFE',
     borderBottomWidth: 1,
-    borderBottomColor: '#E4E7EC',
+    borderBottomColor: '#DDE4DE',
   },
   brandRow: {
     flexDirection: 'row',
@@ -1213,10 +1876,10 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   logoMark: {
-    width: 50,
-    height: 50,
+    width: 46,
+    height: 46,
     borderRadius: 8,
-    backgroundColor: '#0F766E',
+    backgroundColor: '#0B6E69',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1224,31 +1887,31 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   eyebrow: {
-    color: '#7C3AED',
+    color: '#245B8C',
     fontSize: 13,
     fontWeight: '800',
   },
   title: {
     color: '#17212B',
-    fontSize: 26,
+    fontSize: 24,
     fontWeight: '900',
-    lineHeight: 31,
+    lineHeight: 29,
   },
   privacyPill: {
-    marginTop: 12,
+    marginTop: 10,
     alignSelf: 'flex-start',
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
     paddingHorizontal: 10,
     paddingVertical: 6,
-    backgroundColor: '#ECFDF5',
+    backgroundColor: '#EFF8F5',
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#A7F3D0',
+    borderColor: '#C9E8DF',
   },
   privacyText: {
-    color: '#0F766E',
+    color: '#0B6E69',
     fontSize: 13,
     fontWeight: '800',
   },
@@ -1258,6 +1921,9 @@ const styles = StyleSheet.create({
   scrollContent: {
     padding: 18,
     paddingBottom: 128,
+  },
+  screenTransition: {
+    flex: 1,
   },
   stack: {
     gap: 16,
@@ -1275,93 +1941,149 @@ const styles = StyleSheet.create({
     transform: [{ rotate: '180deg' }],
   },
   backText: {
-    color: '#0F766E',
+    color: '#0B6E69',
     fontSize: 16,
     fontWeight: '800',
   },
-  openingGuide: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 8,
-    borderWidth: 1.5,
-    borderColor: '#B2DDFF',
-    padding: 16,
-    gap: 14,
+  homeHero: {
+    paddingTop: 2,
+    paddingBottom: 2,
+    gap: 10,
   },
-  guideHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  guideIcon: {
-    width: 54,
-    height: 54,
-    borderRadius: 8,
-    backgroundColor: '#ECFDF5',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  guideTitleWrap: {
-    flex: 1,
-  },
-  guideEyebrow: {
-    color: '#0F766E',
-    fontSize: 14,
+  homeHeroLabel: {
+    color: '#0B6E69',
+    fontSize: 13,
     fontWeight: '900',
     textTransform: 'uppercase',
   },
-  guideTitle: {
-    marginTop: 2,
+  homeHeroTitle: {
     color: '#17212B',
-    fontSize: 24,
-    lineHeight: 30,
+    fontSize: 30,
+    lineHeight: 36,
     fontWeight: '900',
   },
-  guideSteps: {
-    gap: 12,
+  homeHeroText: {
+    color: '#475467',
+    fontSize: 19,
+    lineHeight: 28,
+    fontWeight: '700',
   },
-  guideStep: {
+  briefStepRow: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  briefStep: {
+    minHeight: 38,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+    backgroundColor: '#EFF8F5',
+  },
+  briefStepText: {
+    color: '#17212B',
+    fontSize: 16,
+    fontWeight: '900',
+  },
+  liveNotice: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#DDE4DE',
+    padding: 14,
+    gap: 10,
+    shadowColor: '#344054',
+    shadowOffset: { width: 0, height: 5 },
+    shadowOpacity: 0.08,
+    shadowRadius: 14,
+    elevation: 2,
+  },
+  liveNoticePressed: {
+    transform: [{ scale: 0.995 }],
+  },
+  liveNoticeTop: {
+    minHeight: 30,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     gap: 10,
   },
-  guideStepText: {
-    flex: 1,
+  liveNoticeKicker: {
+    color: '#245B8C',
+    fontSize: 13,
+    fontWeight: '900',
+    textTransform: 'uppercase',
   },
-  guideStepTitle: {
-    color: '#17212B',
-    fontSize: 18,
-    lineHeight: 24,
+  liveNoticeBadge: {
+    minHeight: 30,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+    justifyContent: 'center',
+    backgroundColor: '#FFFFFF',
+  },
+  liveNoticeBadgeText: {
+    fontSize: 13,
     fontWeight: '900',
   },
-  guideStepDetail: {
-    marginTop: 2,
-    color: '#475467',
-    fontSize: 17,
+  liveNoticeContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  liveNoticeIcon: {
+    width: 54,
+    height: 54,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  liveNoticeText: {
+    flex: 1,
+  },
+  liveNoticeTitle: {
+    color: '#17212B',
+    fontSize: 20,
     lineHeight: 25,
+    fontWeight: '900',
+  },
+  liveNoticeBody: {
+    marginTop: 3,
+    color: '#475467',
+    fontSize: 16,
+    lineHeight: 23,
     fontWeight: '700',
   },
   emergencyButton: {
-    minHeight: 132,
-    backgroundColor: '#B42318',
+    minHeight: 108,
+    backgroundColor: '#B3261E',
     borderRadius: 8,
-    padding: 20,
+    paddingHorizontal: 18,
+    paddingVertical: 16,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 14,
+    shadowColor: '#7A271A',
+    shadowOffset: { width: 0, height: 5 },
+    shadowOpacity: 0.18,
+    shadowRadius: 12,
+    elevation: 3,
   },
   emergencyTextWrap: {
     flex: 1,
   },
   emergencyTitle: {
     color: '#FFFFFF',
-    fontSize: 29,
+    fontSize: 25,
     fontWeight: '900',
-    lineHeight: 36,
+    lineHeight: 31,
   },
   emergencySub: {
     marginTop: 4,
     color: '#FFE9E7',
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: '700',
   },
   sectionHeader: {
@@ -1372,7 +2094,7 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     color: '#17212B',
-    fontSize: 23,
+    fontSize: 24,
     fontWeight: '900',
   },
   textLinkButton: {
@@ -1381,27 +2103,66 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
   },
   inlineLink: {
-    color: '#0F766E',
+    color: '#0B6E69',
     fontSize: 18,
     fontWeight: '900',
   },
   actionList: {
     gap: 12,
   },
-  homeActionButton: {
-    minHeight: 102,
+  homeActionGroup: {
     backgroundColor: '#FFFFFF',
     borderRadius: 8,
-    borderWidth: 1.5,
-    borderColor: '#D0D5DD',
-    padding: 14,
+    borderWidth: 1,
+    borderColor: '#DDE4DE',
+    overflow: 'hidden',
+    shadowColor: '#344054',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.06,
+    shadowRadius: 10,
+    elevation: 1,
+  },
+  toolListGroup: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#DDE4DE',
+    overflow: 'hidden',
+    shadowColor: '#344054',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.06,
+    shadowRadius: 10,
+    elevation: 1,
+  },
+  toolSection: {
+    gap: 8,
+  },
+  toolSectionTitle: {
+    color: '#344054',
+    fontSize: 17,
+    lineHeight: 23,
+    fontWeight: '900',
+  },
+  homeActionButton: {
+    minHeight: 90,
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 15,
+    paddingVertical: 13,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 13,
   },
+  homeActionDivider: {
+    borderBottomWidth: 1,
+    borderBottomColor: '#E4E9E5',
+  },
+  pressedRow: {
+    backgroundColor: '#F1F7F5',
+    transform: [{ scale: 0.995 }],
+  },
   homeActionIcon: {
-    width: 58,
-    height: 58,
+    width: 54,
+    height: 54,
     borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
@@ -1411,24 +2172,22 @@ const styles = StyleSheet.create({
   },
   homeActionTitle: {
     color: '#17212B',
-    fontSize: 22,
-    lineHeight: 28,
+    fontSize: 21,
+    lineHeight: 27,
     fontWeight: '900',
   },
   homeActionDetail: {
     marginTop: 4,
     color: '#475467',
-    fontSize: 17,
-    lineHeight: 23,
+    fontSize: 16,
+    lineHeight: 22,
     fontWeight: '700',
   },
   toolButton: {
     minHeight: 92,
     backgroundColor: '#FFFFFF',
-    borderRadius: 8,
-    borderWidth: 1.5,
-    borderColor: '#D0D5DD',
-    padding: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 13,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 13,
@@ -1437,7 +2196,7 @@ const styles = StyleSheet.create({
     width: 56,
     height: 56,
     borderRadius: 8,
-    backgroundColor: '#E7F7F4',
+    backgroundColor: '#E7F4F1',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1462,6 +2221,17 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '800',
   },
+  metricTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  metricSmall: {
+    color: '#475467',
+    fontSize: 15,
+    fontWeight: '900',
+  },
   metricValue: {
     color: '#17212B',
     fontSize: 34,
@@ -1476,7 +2246,7 @@ const styles = StyleSheet.create({
   },
   progressFill: {
     height: '100%',
-    backgroundColor: '#0F766E',
+    backgroundColor: '#0B6E69',
   },
   contactStrip: {
     backgroundColor: '#FFFFFF',
@@ -1502,7 +2272,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#ECFDF5',
+    backgroundColor: '#EFF8F5',
   },
   contactInfo: {
     flex: 1,
@@ -1518,9 +2288,9 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#E7F7F4',
+    backgroundColor: '#E7F4F1',
     borderWidth: 1,
-    borderColor: '#99F6E4',
+    borderColor: '#BFE3DA',
   },
   screenIntro: {
     color: '#344054',
@@ -1580,15 +2350,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#99F6E4',
-    backgroundColor: '#ECFDF5',
+    borderColor: '#BFE3DA',
+    backgroundColor: '#EFF8F5',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
   },
   secondaryActionText: {
-    color: '#0F766E',
+    color: '#0B6E69',
     fontSize: 17,
     fontWeight: '900',
   },
@@ -1597,15 +2367,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#99F6E4',
-    backgroundColor: '#ECFDF5',
+    borderColor: '#BFE3DA',
+    backgroundColor: '#EFF8F5',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
   },
   secondaryButtonWideText: {
-    color: '#0F766E',
+    color: '#0B6E69',
     fontSize: 18,
     fontWeight: '900',
   },
@@ -1619,7 +2389,7 @@ const styles = StyleSheet.create({
     minHeight: 64,
     borderRadius: 8,
     paddingHorizontal: 14,
-    backgroundColor: '#0F766E',
+    backgroundColor: '#0B6E69',
     alignItems: 'center',
     justifyContent: 'center',
     flexDirection: 'row',
@@ -1666,11 +2436,29 @@ const styles = StyleSheet.create({
     padding: 15,
     gap: 12,
   },
+  aiPanel: {
+    borderRadius: 8,
+    borderWidth: 1.5,
+    padding: 15,
+    gap: 12,
+  },
+  aiActionBox: {
+    gap: 8,
+  },
+  errorText: {
+    color: '#B42318',
+    fontSize: 16,
+    lineHeight: 23,
+    fontWeight: '800',
+  },
   riskTop: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
     gap: 12,
+  },
+  riskTextColumn: {
+    flex: 1,
   },
   riskLabel: {
     fontSize: 15,
@@ -1752,7 +2540,7 @@ const styles = StyleSheet.create({
     borderColor: '#E4E7EC',
   },
   scriptLabel: {
-    color: '#7C3AED',
+    color: '#245B8C',
     fontSize: 13,
     fontWeight: '900',
     textTransform: 'uppercase',
@@ -1857,7 +2645,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     borderRadius: 8,
     borderWidth: 2,
-    borderColor: '#0F766E',
+    borderColor: '#0B6E69',
     backgroundColor: '#17212B',
   },
   cameraView: {
@@ -1883,14 +2671,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#99F6E4',
-    backgroundColor: '#ECFDF5',
+    borderColor: '#BFE3DA',
+    backgroundColor: '#EFF8F5',
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
   },
   refreshText: {
-    color: '#0F766E',
+    color: '#0B6E69',
     fontSize: 15,
     fontWeight: '900',
   },
@@ -1908,7 +2696,7 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   newsSource: {
-    color: '#7C3AED',
+    color: '#245B8C',
     fontSize: 13,
     fontWeight: '900',
     textTransform: 'uppercase',
@@ -1947,7 +2735,7 @@ const styles = StyleSheet.create({
     gap: 9,
   },
   rememberText: {
-    color: '#7C3AED',
+    color: '#245B8C',
     fontSize: 16,
     lineHeight: 23,
     fontWeight: '900',
@@ -1961,7 +2749,7 @@ const styles = StyleSheet.create({
     gap: 9,
   },
   practiceCard: {
-    backgroundColor: '#17212B',
+    backgroundColor: '#183A4A',
     borderRadius: 8,
     padding: 18,
     gap: 10,
@@ -1987,12 +2775,16 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   answerSelected: {
-    borderColor: '#A78BFA',
-    backgroundColor: '#F5F3FF',
+    borderColor: '#9BC3DF',
+    backgroundColor: '#EDF6FB',
   },
   answerCorrect: {
     borderColor: '#5EEAD4',
-    backgroundColor: '#ECFDF5',
+    backgroundColor: '#EFF8F5',
+  },
+  answerWrong: {
+    borderColor: '#FDA29B',
+    backgroundColor: '#FFF1F0',
   },
   answerText: {
     color: '#17212B',
@@ -2008,9 +2800,12 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   feedbackTitle: {
-    color: '#0F766E',
+    color: '#0B6E69',
     fontSize: 22,
     fontWeight: '900',
+  },
+  feedbackWrong: {
+    color: '#B42318',
   },
   bottomNav: {
     position: 'absolute',
@@ -2033,6 +2828,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 4,
     minHeight: 64,
+    borderRadius: 8,
+  },
+  navItemActive: {
+    backgroundColor: '#EFF8F5',
   },
   navLabel: {
     color: '#667085',
@@ -2040,11 +2839,11 @@ const styles = StyleSheet.create({
     fontWeight: '900',
   },
   navLabelActive: {
-    color: '#0F766E',
+    color: '#0B6E69',
   },
   modalScreen: {
     flex: 1,
-    backgroundColor: '#F6F8F6',
+    backgroundColor: '#F4F7F5',
   },
   modalHeader: {
     paddingTop: 56,

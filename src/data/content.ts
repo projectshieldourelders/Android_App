@@ -12,7 +12,7 @@ export const fallbackAlerts: ScamAlert[] = [
   {
     id: 'medicare-calls',
     title: 'Fake Medicare card and benefit calls',
-    source: 'Project Shield',
+    source: 'Workshop alert',
     date: 'Workshop alert',
     summary: 'Scammers may ask for Medicare numbers, bank details, or fees for a new card. Medicare will not threaten benefits on an incoming call.',
     url: 'https://www.medicare.gov/basics/reporting-medicare-fraud-and-abuse',
@@ -28,7 +28,7 @@ export const fallbackAlerts: ScamAlert[] = [
   {
     id: 'voice-clone',
     title: 'Voice-clone family emergency scams',
-    source: 'Project Shield',
+    source: 'Workshop alert',
     date: 'Workshop alert',
     summary: 'A familiar voice is not enough proof. Hang up, call the saved number, and ask for the family verification phrase.',
     url: 'https://consumer.ftc.gov/scams',
@@ -112,7 +112,7 @@ export const practiceExamples: PracticeExample[] = [
     channel: 'Text message',
     message: 'Your Amazon account has been charged $799. Call 844-555-0199 immediately if this was not you.',
     answer: 'scam',
-    explanation: 'The message creates fear and pushes you to call a number from the message. Open Amazon yourself or call the official number.',
+    explanation: 'It creates fear and gives you a phone number to call. Open Amazon yourself or use the official number.',
     redFlags: ['Unexpected charge', 'Urgent call request', 'Unverified phone number'],
   },
   {
@@ -120,7 +120,7 @@ export const practiceExamples: PracticeExample[] = [
     channel: 'Phone call',
     message: 'This is your bank fraud department. Read me the six-digit code we just sent so I can stop the theft.',
     answer: 'scam',
-    explanation: 'Verification codes should never be shared with an incoming caller, even if they claim to be the bank.',
+    explanation: 'Do not share verification codes with an incoming caller, even if they say they are from the bank.',
     redFlags: ['Verification code request', 'Bank impersonation', 'Urgency'],
   },
   {
@@ -128,8 +128,16 @@ export const practiceExamples: PracticeExample[] = [
     channel: 'Text message',
     message: 'Your prescription is ready for pickup at the pharmacy you use. No payment or code requested.',
     answer: 'safe',
-    explanation: 'This has no link, no payment request, no threat, and no request for personal information. Still use the pharmacy app or known number if unsure.',
+    explanation: 'There is no link, payment request, threat, or request for private information. Use the pharmacy app or known number if unsure.',
     redFlags: [],
+  },
+  {
+    id: 'new-device-alert',
+    channel: 'Email',
+    message: 'A new device signed in to your bank account. If this was not you, open your bank app or call the number on your card.',
+    answer: 'suspicious',
+    explanation: 'The warning could be real, but you should not use a link or phone number from the message. Open the bank app or use your card.',
+    redFlags: ['Account warning', 'Needs separate verification'],
   },
   {
     id: 'grandchild-bail',
@@ -152,8 +160,16 @@ export const practiceExamples: PracticeExample[] = [
     channel: 'Voicemail',
     message: 'This is Dr. Patel’s office. Please call the number on your appointment card about your Tuesday appointment.',
     answer: 'safe',
-    explanation: 'The message asks you to use a number you already have, not a new link, code, or payment method.',
+    explanation: 'It asks you to use a number you already have. There is no new link, code, or payment request.',
     redFlags: [],
+  },
+  {
+    id: 'charity-donation',
+    channel: 'Text message',
+    message: 'Can you donate today for storm relief? We are collecting through Venmo. Reply if you want the handle.',
+    answer: 'suspicious',
+    explanation: 'It may be real, but donations should be checked through the charity website before sending money.',
+    redFlags: ['Payment app', 'Unverified charity'],
   },
 ];
 

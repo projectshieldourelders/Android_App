@@ -194,16 +194,16 @@ const rules: PatternRule[] = [
 ];
 
 const defaultNextSteps = [
-  'Pause before replying. Do not click links or call numbers in the message.',
-  'Call the official company number from a card, statement, or official website.',
-  'Ask a trusted contact to verify it with you.',
+  'Pause before replying.',
+  'Use the official number or website.',
+  'Ask a trusted person to check it with you.',
 ];
 
 const stopNextSteps = [
-  'Hang up or stop replying now.',
-  'Do not send money, gift card numbers, crypto, or verification codes.',
-  'Call your trusted contact before doing anything else.',
-  'Use the official company number, not the number that contacted you.',
+  'Hang up or stop replying.',
+  'Do not send money or codes.',
+  'Call your trusted person.',
+  'Use the official number, not the one that contacted you.',
 ];
 
 export function levelForScore(score: number): RiskLevel {
@@ -216,13 +216,13 @@ export function levelForScore(score: number): RiskLevel {
 export function labelForLevel(level: RiskLevel) {
   switch (level) {
     case 'stop':
-      return 'Stop and Verify';
+      return 'Stop';
     case 'high':
       return 'High Risk';
     case 'caution':
-      return 'Caution';
+      return 'Check First';
     default:
-      return 'Low Concern';
+      return 'Looks Okay';
   }
 }
 
@@ -235,7 +235,7 @@ export function getLevelColor(level: RiskLevel) {
     case 'caution':
       return '#B7791F';
     default:
-      return '#0F766E';
+      return '#0B6E69';
   }
 }
 
@@ -292,13 +292,13 @@ export function analyzeMessage(input: string, context = 'message'): AnalysisResu
     ? `${labelForLevel(level)}: ${findings[0].title}`
     : text
       ? 'No major pressure signs found'
-      : 'Add text to run a check';
+      : 'Paste text to check';
 
   const summary = findings.length
-    ? `This ${context} has ${findings.length} warning sign${findings.length === 1 ? '' : 's'}. The concern is not one word by itself; it is the pattern of pressure, payment, identity, and verification requests.`
+    ? `Found ${findings.length} warning sign${findings.length === 1 ? '' : 's'} in this ${context}. Look at the pattern, then verify another way.`
     : text
-      ? 'I do not see the strongest scam-pressure patterns in this text. Still verify unexpected account, medical, delivery, or family emergency messages through official channels.'
-      : 'Paste a message, transcript, or notes from a call to get a plain-language explanation.';
+      ? 'No strong pressure pattern was found. Still use official channels for account, medical, delivery, or family messages.'
+      : 'Paste a message, transcript, or call notes.';
 
   return {
     score,
@@ -310,8 +310,8 @@ export function analyzeMessage(input: string, context = 'message'): AnalysisResu
     nextSteps: level === 'stop' || level === 'high' ? stopNextSteps : defaultNextSteps,
     script:
       level === 'low'
-        ? 'I will verify this through the official number before I respond.'
-        : 'I am stopping now. I will call the official number myself and speak with my trusted contact first.',
+        ? 'I will check this another way before I respond.'
+        : 'I am stopping now. I will call the official number and my trusted person first.',
   };
 }
 
@@ -335,12 +335,12 @@ export function analyzeCallChecklist(answers: Record<string, boolean>): Analysis
     level,
     headline: callFindings.length ? `${labelForLevel(level)} call` : 'No major call red flags selected',
     summary: callFindings.length
-      ? 'The risk comes from the caller trying to control your next action. Slow down, end the call, and verify independently.'
-      : 'If the call was unexpected, it is still safest to verify using an official number.',
+      ? 'The caller is trying to rush or control the next step. End the call and check another way.'
+      : 'If the call was unexpected, use an official number to check.',
     findings: callFindings,
     matchedTerms: callFindings.map((finding) => finding.title),
     nextSteps: level === 'low' ? defaultNextSteps : stopNextSteps,
-    script: 'I do not handle money, codes, or account access on incoming calls. I am hanging up and calling the official number.',
+    script: 'I do not handle money, codes, or account access on incoming calls. I am hanging up.',
   };
 }
 
@@ -362,16 +362,16 @@ export function analyzeVoiceClone(answers: Record<string, boolean>, phrase?: str
     score,
     level,
     headline: `${labelForLevel(level)} for voice-clone risk`,
-    summary: 'Do not rely on the voice alone. Hang up, call the person back using a saved number, and ask for the family verification phrase.',
+    summary: 'Do not rely on the voice alone. Hang up, call back using a saved number, and ask for the family phrase.',
     findings,
     matchedTerms: findings.map((finding) => finding.title),
     nextSteps: [
       'Ask for the family verification phrase.',
-      'Hang up and call the family member directly using a saved number.',
+      'Call the family member using a saved number.',
       'Call another trusted relative before sending money.',
     ],
     script: phrase?.trim()
-      ? `Before I do anything, tell me our family verification phrase.`
+      ? 'Before I do anything, tell me our family verification phrase.'
       : 'I need to verify this with another family member before I do anything.',
   };
 }
@@ -436,14 +436,14 @@ export function analyzePayments(selected: Record<string, boolean>): AnalysisResu
     level,
     headline: findings.length ? `${labelForLevel(level)} payment request` : 'Choose a payment method',
     summary: findings.length
-      ? 'The safer move is to stop and verify the reason for payment through a trusted person or official number.'
-      : 'Before sending money, choose the payment type to see why scammers may prefer it.',
+      ? 'Stop and check the reason for payment with a trusted person or official number.'
+      : 'Choose the payment type before sending money.',
     findings,
     matchedTerms: findings.map((finding) => finding.title),
     nextSteps: [
-      'Do not send money while someone is pressuring you.',
-      'Call your bank or trusted contact before sending payment.',
-      'Use official billing portals only after typing the website yourself.',
+      'Do not send money while pressured.',
+      'Call your bank or trusted person first.',
+      'Use official billing sites only.',
     ],
     script: 'I do not send money under pressure. I will verify this first.',
   };
@@ -494,7 +494,7 @@ export function analyzeUrl(rawUrl: string): AnalysisResult {
       score: rawUrl.trim() ? 30 : 0,
       level: rawUrl.trim() ? 'caution' : 'low',
       headline: rawUrl.trim() ? 'This does not look like a complete URL' : 'Paste a URL to check',
-      summary: rawUrl.trim() ? 'A broken or odd link should not be opened from an unexpected message.' : 'Paste a link or scan a QR code to preview it before opening.',
+      summary: rawUrl.trim() ? 'Do not open broken or odd links from unexpected messages.' : 'Paste a link or scan a QR code.',
       findings,
       matchedTerms: [],
       nextSteps: defaultNextSteps,
@@ -531,10 +531,10 @@ export function analyzeUrl(rawUrl: string): AnalysisResult {
     score,
     level,
     headline: `${labelForLevel(level)} link`,
-    summary: `Destination shown before opening: ${host}. ${score >= 25 ? 'Treat this as risky until verified.' : 'No major link tricks were detected, but context still matters.'}`,
+    summary: `Destination: ${host}. ${score >= 25 ? 'Treat this as risky until checked.' : 'No major link tricks were found.'}`,
     findings,
     matchedTerms: [host],
-    nextSteps: score >= 25 ? stopNextSteps : ['Open only if you expected it.', 'For banking, delivery, Medicare, or taxes, type the official website yourself.'],
+    nextSteps: score >= 25 ? stopNextSteps : ['Open only if expected.', 'For important accounts, type the website yourself.'],
     script: 'I will not open unexpected links. I will use the official website or app.',
   };
 }
@@ -550,7 +550,7 @@ export function analyzePhoneNumber(phone: string): AnalysisResult {
       score: 0,
       level: 'low',
       headline: 'Paste a phone number to check',
-      summary: 'The app will classify what can be checked locally and give verification steps.',
+      summary: 'The app checks known public numbers and warning patterns.',
       findings,
       matchedTerms: [],
       nextSteps: defaultNextSteps,
@@ -582,10 +582,10 @@ export function analyzePhoneNumber(phone: string): AnalysisResult {
     score,
     level,
     headline: findings.some((finding) => finding.id === 'verified-phone') ? 'Business number: verified public listing' : 'Unknown number',
-    summary: 'Phone lookup is limited locally. The safest proof is still calling the official number from a statement, card, or government website.',
+    summary: 'Phone lookup is limited. The safest proof is still an official statement, card, or website.',
     findings,
     matchedTerms: [cleaned],
-    nextSteps: ['Do not call back numbers from pressure messages.', 'Search the organization yourself or use a printed statement.', 'Block/report repeated scam calls.'],
+    nextSteps: ['Do not call back pressure-message numbers.', 'Search the organization yourself.', 'Block repeated scam calls.'],
     script: 'I do not verify identity through caller ID. I will call the official number myself.',
   };
 }
