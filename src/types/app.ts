@@ -147,6 +147,12 @@ export interface LearningProgress {
   completedWeeks: string[];
   quizScores: Record<string, number>;
   lastActivity: string;
+  // Weekly play streak: number of consecutive weeks with activity.
+  streak: number;
+  // The week index (weeks since epoch) of the most recent streak activity.
+  streakWeek: number;
+  // Best streak achieved, for a little extra motivation.
+  bestStreak: number;
 }
 
 export type DetectionKind = 'call' | 'message' | 'email' | 'link' | 'payment' | 'summary' | 'lesson';

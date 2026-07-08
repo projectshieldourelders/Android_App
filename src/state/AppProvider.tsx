@@ -11,6 +11,7 @@ import {
   UserProfile,
 } from '../types/app';
 import {
+  advanceStreak,
   clearAllData,
   defaultPreferences,
   defaultProgress,
@@ -52,6 +53,7 @@ interface AppContextValue {
   completeOnboarding: (data: { profile: UserProfile; prefs: Preferences; survey: CapabilitySurvey | null }) => void;
   updateProfile: (profile: UserProfile) => void;
   updateProgress: (progress: LearningProgress) => void;
+  recordStreak: () => void;
   pushDetection: (event: DetectionEvent) => void;
   markAllDetectionsRead: () => void;
   clearDetections: () => void;
@@ -157,6 +159,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     saveProgress(next);
   }, []);
 
+  const recordStreak = useCallback(() => {
+    setProgressState((current) => {
+      const next = advanceStreak(current);
+      if (next !== current) saveProgress(next);
+      return next;
+    });
+  }, []);
+
   const pushDetection = useCallback((event: DetectionEvent) => {
     setDetectionsState((current) => {
       const next = [event, ...current].slice(0, 50);
@@ -206,6 +216,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     completeOnboarding,
     updateProfile,
     updateProgress,
+    recordStreak,
     pushDetection,
     markAllDetectionsRead,
     clearDetections,

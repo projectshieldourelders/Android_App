@@ -86,7 +86,34 @@ export const defaultProgress: LearningProgress = {
   completedWeeks: [],
   quizScores: {},
   lastActivity: '',
+  streak: 0,
+  streakWeek: 0,
+  bestStreak: 0,
 };
+
+/** Week index since the Unix epoch (used for weekly streak math). */
+export function currentWeekIndex(now: Date = new Date()): number {
+  return Math.floor(now.getTime() / (7 * 24 * 60 * 60 * 1000));
+}
+
+/**
+ * Given the stored progress, return an updated streak after activity today.
+ * - Same week as last activity: unchanged.
+ * - Exactly the next week: +1.
+ * - Otherwise (gap or first ever): reset to 1.
+ */
+export function advanceStreak(progress: LearningProgress, now: Date = new Date()): LearningProgress {
+  const week = currentWeekIndex(now);
+  if (progress.streak > 0 && progress.streakWeek === week) return progress;
+  const streak = progress.streak > 0 && progress.streakWeek === week - 1 ? progress.streak + 1 : 1;
+  return {
+    ...progress,
+    streak,
+    streakWeek: week,
+    bestStreak: Math.max(progress.bestStreak ?? 0, streak),
+    lastActivity: now.toISOString(),
+  };
+}
 
 export async function loadPreferences(): Promise<Preferences> {
   const raw = await AsyncStorage.getItem(PREFS_KEY);

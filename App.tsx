@@ -46,6 +46,12 @@ import {
   KeyRound,
   MonitorOff,
   Shuffle,
+  Grid3x3,
+  ToggleLeft,
+  PenLine,
+  Flag,
+  Brain,
+  Flame,
 } from 'lucide-react-native';
 import type { LucideIcon } from 'lucide-react-native';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -53,6 +59,7 @@ import {
   ActivityIndicator,
   Alert,
   Animated,
+  Dimensions,
   Easing,
   Image,
   KeyboardAvoidingView,
@@ -110,7 +117,19 @@ import {
   TrustedContact,
   WeeklyModule,
 } from './src/types/app';
-import { matchPairs, scrambleWords, shuffle } from './src/data/games';
+import {
+  buildCrossword,
+  crosswordClues,
+  crosswordSize,
+  fillBlankItems,
+  key as cellKey,
+  matchPairs,
+  memoryTerms,
+  redFlagItems,
+  scrambleWords,
+  shuffle,
+  trueFalseItems,
+} from './src/data/games';
 import { requestAllPermissions } from './src/services/permissions';
 import { AnimatedToggle, Btn, Card, ListRow } from './src/ui/kit';
 
@@ -306,7 +325,7 @@ function Root() {
 function MainApp() {
   const theme = useTheme();
   const styles = useMemo(() => makeStyles(theme), [theme]);
-  const { profile, prefs, progress, detections, unreadCount, pushDetection, markAllDetectionsRead, walkthroughSeen, markWalkthroughSeen } = useApp();
+  const { profile, prefs, progress, detections, unreadCount, pushDetection, markAllDetectionsRead, walkthroughSeen, markWalkthroughSeen, recordStreak } = useApp();
 
   const scrollRef = useRef<ScrollView>(null);
   const screenAnim = useRef(new Animated.Value(1)).current;
@@ -350,7 +369,7 @@ function MainApp() {
   const [notificationsVisible, setNotificationsVisible] = useState(false);
   const [menuVisible, setMenuVisible] = useState(false);
   const [aboutVisible, setAboutVisible] = useState(false);
-  const [game, setGame] = useState<'none' | 'scramble' | 'match'>('none');
+  const [game, setGame] = useState<'none' | 'scramble' | 'match' | 'crossword' | 'truefalse' | 'fillblank' | 'redflag' | 'memory'>('none');
   const [contactDrafts, setContactDrafts] = useState<TrustedContact[]>([
     { id: 'contact-1', label: 'Trusted Contact 1', name: '', phone: '' },
     { id: 'contact-2', label: 'Trusted Contact 2', name: '', phone: '' },
@@ -439,6 +458,7 @@ function MainApp() {
     if (next === screen) return;
     setScreen(next);
     if (next !== 'qr') setScanning(false);
+    if (next !== 'games') setGame('none');
     if (next === 'activity') markAllDetectionsRead();
   }
 
@@ -706,6 +726,7 @@ function MainApp() {
     const answered = practiceStats.answered + 1;
     setPracticeStats({ correct, answered });
     setConfidence(await addConfidenceEntry(Math.round((correct / answered) * 100)));
+    recordStreak();
   }
 
   function nextPractice() {
@@ -828,38 +849,55 @@ function MainApp() {
     return (
       <View style={styles.homeStack}>
         {/* Big, clear help button — the most important action */}
-        <TouchableOpacity
-          style={styles.emergencyButton}
-          activeOpacity={0.9}
-          onPress={() => {
-            setEmergencyVisible(true);
-            navigate('emergency');
-          }}
-          accessibilityRole="button"
-          accessibilityLabel="I think this is a scam. Show safety steps."
-        >
-          <View style={styles.emergencyIcon}>
-            <Siren size={theme.icon(34)} color={theme.colors.onBrand} strokeWidth={2.6} />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.emergencyTitle}>I think this is a scam</Text>
-            <Text style={styles.emergencySub}>Tap for safety steps</Text>
-          </View>
-          <ChevronRight size={theme.icon(28)} color={theme.colors.onBrand} strokeWidth={2.6} />
-        </TouchableOpacity>
+        <Reveal delay={0}>
+          <TouchableOpacity
+            style={styles.emergencyButton}
+            activeOpacity={0.9}
+            onPress={() => {
+              setEmergencyVisible(true);
+              navigate('emergency');
+            }}
+            accessibilityRole="button"
+            accessibilityLabel="I think this is a scam. Show safety steps."
+          >
+            <View style={styles.emergencyIcon}>
+              <Siren size={theme.icon(34)} color={theme.colors.onBrand} strokeWidth={2.6} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.emergencyTitle}>I think this is a scam</Text>
+              <Text style={styles.emergencySub}>Tap for safety steps</Text>
+            </View>
+            <ChevronRight size={theme.icon(28)} color={theme.colors.onBrand} strokeWidth={2.6} />
+          </TouchableOpacity>
+        </Reveal>
+
+        {/* Streak chip — encourages weekly play */}
+        {progress.streak > 0 ? (
+          <Reveal delay={60}>
+            <TouchableOpacity style={styles.homeStreakChip} onPress={() => navigate('games')} activeOpacity={0.85} accessibilityRole="button">
+              <View style={styles.homeStreakIcon}>
+                <Flame size={theme.icon(22)} color={theme.colors.onBrand} strokeWidth={2} />
+              </View>
+              <Text style={styles.homeStreakText}>{progress.streak}-week streak — keep it going!</Text>
+              <ChevronRight size={theme.icon(20)} color={theme.colors.brand} strokeWidth={2.2} />
+            </TouchableOpacity>
+          </Reveal>
+        ) : null}
 
         {/* Check something — big icon-first tiles */}
-        <Text style={styles.homeSectionTitle}>Check something</Text>
-        <View style={styles.homeGrid}>
-          {homeQuickChecks.map((tool) => (
-            <HomeTile key={tool.screen} {...tool} onPress={() => navigate(tool.screen)} />
-          ))}
-        </View>
+        <Reveal delay={120}>
+          <Text style={styles.homeSectionTitle}>Check something</Text>
+          <View style={[styles.homeGrid, { marginTop: theme.space.md }]}>
+            {homeQuickChecks.map((tool) => (
+              <HomeTile key={tool.screen} {...tool} onPress={() => navigate(tool.screen)} />
+            ))}
+          </View>
+        </Reveal>
 
         {/* Today's lesson */}
         {nextLesson ? (
-          <>
-            <Text style={styles.homeSectionTitle}>Today’s lesson</Text>
+          <Reveal delay={180}>
+            <Text style={[styles.homeSectionTitle, { marginBottom: theme.space.md }]}>Today’s lesson</Text>
             <TouchableOpacity
               style={styles.lessonCta}
               activeOpacity={0.9}
@@ -876,11 +914,13 @@ function MainApp() {
               </View>
               <ChevronRight size={theme.icon(26)} color={theme.colors.onBrand} strokeWidth={2.5} />
             </TouchableOpacity>
-          </>
+          </Reveal>
         ) : null}
 
         {/* Trusted contact */}
-        <TrustedContactStrip contacts={contacts} onCall={callContact} onText={textContact} onManage={() => navigate('contacts')} />
+        <Reveal delay={240}>
+          <TrustedContactStrip contacts={contacts} onCall={callContact} onText={textContact} onManage={() => navigate('contacts')} />
+        </Reveal>
       </View>
     );
   }
@@ -1479,14 +1519,36 @@ function MainApp() {
   }
 
   function renderGames() {
-    if (game === 'scramble') return <ScrambleGame onBack={() => setGame('none')} />;
-    if (game === 'match') return <MatchGame onBack={() => setGame('none')} />;
+    const back = () => setGame('none');
+    if (game === 'scramble') return <ScrambleGame onBack={back} onWin={recordStreak} />;
+    if (game === 'match') return <MatchGame onBack={back} onWin={recordStreak} />;
+    if (game === 'crossword') return <CrosswordGame onBack={back} onWin={recordStreak} />;
+    if (game === 'truefalse') return <TrueFalseGame onBack={back} onWin={recordStreak} />;
+    if (game === 'fillblank') return <FillBlankGame onBack={back} onWin={recordStreak} />;
+    if (game === 'redflag') return <RedFlagGame onBack={back} onWin={recordStreak} />;
+    if (game === 'memory') return <MemoryGame onBack={back} onWin={recordStreak} />;
+
+    const tiles: Array<{ icon: LucideIcon; title: string; onPress: () => void; tone: number }> = [
+      { icon: Trophy, title: 'Spot the Scam', onPress: () => navigate('practice'), tone: 0 },
+      { icon: Grid3x3, title: 'Crossword', onPress: () => setGame('crossword'), tone: 1 },
+      { icon: Shuffle, title: 'Word Scramble', onPress: () => setGame('scramble'), tone: 2 },
+      { icon: Puzzle, title: 'Match the Term', onPress: () => setGame('match'), tone: 3 },
+      { icon: ToggleLeft, title: 'True or False', onPress: () => setGame('truefalse'), tone: 0 },
+      { icon: PenLine, title: 'Fill the Blank', onPress: () => setGame('fillblank'), tone: 1 },
+      { icon: Flag, title: 'Red Flag Rush', onPress: () => setGame('redflag'), tone: 2 },
+      { icon: Brain, title: 'Memory Match', onPress: () => setGame('memory'), tone: 3 },
+    ];
     return (
       <View style={styles.stack}>
-        <Text style={styles.screenIntro}>Fun ways to sharpen your scam-spotting. Play any time — there is no timer and no pressure.</Text>
-        <GameCard icon={Trophy} title="Spot the Scam" detail="Decide if real examples are safe or a scam." onPress={() => navigate('practice')} />
-        <GameCard icon={Shuffle} title="Word Scramble" detail="Unscramble common scam-safety words." onPress={() => setGame('scramble')} />
-        <GameCard icon={Puzzle} title="Match the Term" detail="Match each term to what it means." onPress={() => setGame('match')} />
+        <StreakBanner streak={progress.streak} best={progress.bestStreak} />
+        <Text style={styles.screenIntro}>Play a quick game to keep sharp. Play any week to grow your streak — no timer, no pressure.</Text>
+        <View style={styles.tileGrid}>
+          {tiles.map((tile, i) => (
+            <Reveal key={tile.title} delay={i * 55} style={styles.gameTileWrap}>
+              <GameTile icon={tile.icon} title={tile.title} tone={tile.tone} onPress={tile.onPress} />
+            </Reveal>
+          ))}
+        </View>
       </View>
     );
   }
@@ -1564,7 +1626,14 @@ function MainApp() {
         </View>
       </Modal>
       <Modal visible={!walkthroughSeen} animationType="fade" onRequestClose={markWalkthroughSeen}>
-        <Walkthrough onSkip={markWalkthroughSeen} onDone={startWalkthroughLesson} />
+        <Walkthrough
+          onSkip={markWalkthroughSeen}
+          onLesson={startWalkthroughLesson}
+          onQuickCheck={() => {
+            markWalkthroughSeen();
+            navigate('scam');
+          }}
+        />
       </Modal>
 
       {/* Notifications (opened by the bell on every page) */}
@@ -1580,26 +1649,26 @@ function MainApp() {
         </View>
       </Modal>
 
-      {/* Menu / options (hamburger on home) */}
-      <Modal visible={menuVisible} animationType="slide" onRequestClose={() => setMenuVisible(false)}>
-        <View style={styles.modalScreen}>
-          <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>Menu</Text>
-            <Pressable style={styles.closeButton} onPress={() => setMenuVisible(false)} accessibilityLabel="Close">
-              <X size={theme.icon(24)} color={theme.colors.ink} />
-            </Pressable>
+      {/* Menu / options (hamburger on home) — slides in from the side */}
+      <SideDrawer visible={menuVisible} onClose={() => setMenuVisible(false)}>
+        <View style={styles.drawerHeader}>
+          <View style={styles.drawerLogo}>
+            <ShieldCheck size={theme.icon(24)} color={theme.colors.onBrand} strokeWidth={2} />
           </View>
-          <ScrollView contentContainerStyle={styles.modalContent}>
-            <Card style={{ gap: 0, padding: 0, paddingHorizontal: theme.space.lg }}>
-              <ListRow icon={SettingsIcon} label="Settings" onPress={() => { setMenuVisible(false); navigate('settings'); }} />
-              <ListRow icon={Bell} label="Notifications" onPress={() => { setMenuVisible(false); setNotificationsVisible(true); markAllDetectionsRead(); }} />
-              <ListRow icon={Users} label="Trusted contacts" onPress={() => { setMenuVisible(false); navigate('contacts'); }} />
-              <ListRow icon={KeyRound} label="App permissions" onPress={() => { requestAllPermissions(); }} />
-              <ListRow icon={Info} label="About Shield Our Elders" onPress={() => { setMenuVisible(false); setAboutVisible(true); }} last />
-            </Card>
-          </ScrollView>
+          <Text style={styles.drawerTitle}>Menu</Text>
+          <Pressable style={styles.closeButton} onPress={() => setMenuVisible(false)} accessibilityLabel="Close menu">
+            <X size={theme.icon(22)} color={theme.colors.ink} />
+          </Pressable>
         </View>
-      </Modal>
+        <ScrollView contentContainerStyle={{ padding: theme.space.lg, gap: theme.space.xs }}>
+          <ListRow icon={SettingsIcon} label="Settings" onPress={() => { setMenuVisible(false); navigate('settings'); }} />
+          <ListRow icon={Bell} label="Notifications" onPress={() => { setMenuVisible(false); setNotificationsVisible(true); markAllDetectionsRead(); }} />
+          <ListRow icon={Users} label="Trusted contacts" onPress={() => { setMenuVisible(false); navigate('contacts'); }} />
+          <ListRow icon={Puzzle} label="Games" onPress={() => { setMenuVisible(false); navigate('games'); }} />
+          <ListRow icon={KeyRound} label="App permissions" onPress={() => requestAllPermissions()} />
+          <ListRow icon={Info} label="About Shield Our Elders" onPress={() => { setMenuVisible(false); setAboutVisible(true); }} last />
+        </ScrollView>
+      </SideDrawer>
 
       {/* About Us */}
       <Modal visible={aboutVisible} animationType="slide" onRequestClose={() => setAboutVisible(false)}>
@@ -2053,7 +2122,7 @@ function WeekRow({
 function LessonScreen({ module, onBack }: { module: WeeklyModule; onBack: () => void }) {
   const theme = useTheme();
   const styles = useMemo(() => makeStyles(theme), [theme]);
-  const { progress, updateProgress } = useApp();
+  const { progress, updateProgress, recordStreak } = useApp();
   const [phase, setPhase] = useState<'read' | 'quiz' | 'done'>('read');
   const [qIndex, setQIndex] = useState(0);
   const [selected, setSelected] = useState<number | null>(null);
@@ -2084,6 +2153,7 @@ function LessonScreen({ module, onBack }: { module: WeeklyModule; onBack: () => 
       currentWeek: Math.max(progress.currentWeek, module.week + 1),
       lastActivity: new Date().toISOString(),
     });
+    recordStreak();
     setPhase('done');
   }
 
@@ -2216,18 +2286,35 @@ function ProgressBarTinted({ value }: { value: number }) {
 }
 
 // First-run feature walkthrough shown once after onboarding.
-function Walkthrough({ onDone, onSkip }: { onDone: () => void; onSkip: () => void }) {
+function Walkthrough({ onLesson, onQuickCheck, onSkip }: { onLesson: () => void; onQuickCheck: () => void; onSkip: () => void }) {
   const theme = useTheme();
   const styles = useMemo(() => makeStyles(theme), [theme]);
   const [index, setIndex] = useState(0);
   const slides = [
-    { icon: ShieldCheck, title: 'Welcome — you’re in control', body: 'When anything feels off, this app helps you pause and check it calmly. There is never any rush.' },
-    { icon: LayoutGrid, title: 'Check anything', body: 'Tap “Check something” on the home screen to look at a message, call, link, number, or payment.' },
-    { icon: GraduationCap, title: 'Learn a little each week', body: 'A new short lesson opens every week. Read it and take a quick 5-question quiz.' },
-    { icon: Bell, title: 'Get clear alerts', body: 'If a check finds a possible scam, you’ll get a plain warning — and it’s saved under Alerts.' },
+    {
+      icon: ShieldCheck,
+      title: 'This is your scam shield',
+      body: 'When a call, message, or email doesn’t feel right, Shield Our Elders helps you slow down and check it calmly. You always have time.',
+    },
+    {
+      icon: LayoutGrid,
+      title: 'Check anything in seconds',
+      body: 'From Checks, look at a message, phone call, link, QR code, number, or payment. We explain the warning signs in plain words.',
+    },
+    {
+      icon: Siren,
+      title: 'Help when it counts',
+      body: 'Tap the big red “I think this is a scam” button any time for calm, step-by-step safety actions — and reach a trusted person fast.',
+    },
+    {
+      icon: GraduationCap,
+      title: 'Learn and play each week',
+      body: 'A short new lesson opens weekly, plus 8 fun games. Play each week to build a streak and grow your confidence.',
+    },
   ];
-  const isLast = index === slides.length - 1;
-  const slide = slides[index];
+  const total = slides.length;
+  const isReady = index === total; // final choice screen
+  const slide = slides[Math.min(index, total - 1)];
   const Icon = slide.icon;
 
   return (
@@ -2237,24 +2324,43 @@ function Walkthrough({ onDone, onSkip }: { onDone: () => void; onSkip: () => voi
           <Text style={styles.walkSkipText}>Skip</Text>
         </TouchableOpacity>
       </View>
-      <View style={styles.walkBody}>
-        <View style={styles.walkIcon}>
-          <Icon size={theme.icon(56)} color={theme.colors.onBrand} strokeWidth={2.2} />
-        </View>
-        <Text style={styles.walkTitle}>{slide.title}</Text>
-        <Text style={styles.walkText}>{slide.body}</Text>
-        <View style={styles.walkDots}>
-          {slides.map((_, i) => (
-            <View key={i} style={[styles.walkDot, i === index && styles.walkDotActive]} />
-          ))}
-        </View>
-      </View>
+
+      {isReady ? (
+        <Reveal key="ready" style={styles.walkBody}>
+          <View style={[styles.walkIcon, { backgroundColor: theme.colors.low }]}>
+            <CheckCircle2 size={theme.icon(56)} color={theme.colors.onBrand} strokeWidth={2.2} />
+          </View>
+          <Text style={styles.walkTitle}>You’re all set!</Text>
+          <Text style={styles.walkText}>Would you like to try a quick check now, or start your first weekly lesson?</Text>
+        </Reveal>
+      ) : (
+        <Reveal key={index} style={styles.walkBody}>
+          <View style={styles.walkIcon}>
+            <Icon size={theme.icon(56)} color={theme.colors.onBrand} strokeWidth={2.2} />
+          </View>
+          <Text style={styles.walkTitle}>{slide.title}</Text>
+          <Text style={styles.walkText}>{slide.body}</Text>
+          <View style={styles.walkDots}>
+            {slides.map((_, i) => (
+              <View key={i} style={[styles.walkDot, i === index && styles.walkDotActive]} />
+            ))}
+          </View>
+        </Reveal>
+      )}
+
       <View style={styles.walkFooter}>
-        <Btn
-          label={isLast ? 'Start my first lesson' : 'Next'}
-          icon={isLast ? GraduationCap : ChevronRight}
-          onPress={() => (isLast ? onDone() : setIndex((i) => i + 1))}
-        />
+        {isReady ? (
+          <>
+            <Btn label="Try a quick check" icon={ShieldCheck} onPress={onQuickCheck} />
+            <View style={{ height: theme.space.sm }} />
+            <Btn label="Start my first lesson" variant="secondary" icon={GraduationCap} onPress={onLesson} />
+            <TouchableOpacity onPress={onSkip} style={styles.walkSkip} accessibilityRole="button">
+              <Text style={[styles.walkSkipText, { textAlign: 'center' }]}>Maybe later — go to home</Text>
+            </TouchableOpacity>
+          </>
+        ) : (
+          <Btn label="Next" icon={ChevronRight} onPress={() => setIndex((i) => i + 1)} />
+        )}
       </View>
     </View>
   );
@@ -2288,38 +2394,14 @@ function NavItem({ icon: Icon, label, active, onPress }: { icon: LucideIcon; lab
       accessibilityLabel={label}
     >
       <Animated.View style={{ transform: [{ scale }] }}>
-        <Icon size={theme.icon(30)} color={color} strokeWidth={active ? 2.1 : 1.8} />
+        <Icon size={theme.icon(34)} color={color} strokeWidth={active ? 2.1 : 1.8} />
       </Animated.View>
       <Text style={[styles.navLabel, { color }, active && styles.navLabelActive]}>{label}</Text>
     </TouchableOpacity>
   );
 }
 
-function GameCard({ icon: Icon, title, detail, onPress }: { icon: LucideIcon; title: string; detail: string; onPress: () => void }) {
-  const theme = useTheme();
-  const styles = useMemo(() => makeStyles(theme), [theme]);
-  const scale = useRef(new Animated.Value(1)).current;
-  const press = (to: number) => {
-    if (theme.reducedMotion) return;
-    Animated.spring(scale, { toValue: to, useNativeDriver: true, speed: 40, bounciness: 5 }).start();
-  };
-  return (
-    <Animated.View style={{ transform: [{ scale }] }}>
-      <Pressable style={styles.gameCard} onPress={onPress} onPressIn={() => press(0.97)} onPressOut={() => press(1)} accessibilityRole="button" accessibilityLabel={`${title}. ${detail}`}>
-        <View style={styles.gameIcon}>
-          <Icon size={theme.icon(30)} color={theme.colors.brand} strokeWidth={2} />
-        </View>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.gameTitle}>{title}</Text>
-          <Text style={styles.gameDetail}>{detail}</Text>
-        </View>
-        <ChevronRight size={theme.icon(24)} color={theme.colors.faint} strokeWidth={2} />
-      </Pressable>
-    </Animated.View>
-  );
-}
-
-function ScrambleGame({ onBack }: { onBack: () => void }) {
+function ScrambleGame({ onBack, onWin }: { onBack: () => void; onWin: () => void }) {
   const theme = useTheme();
   const styles = useMemo(() => makeStyles(theme), [theme]);
   const [index, setIndex] = useState(0);
@@ -2329,6 +2411,9 @@ function ScrambleGame({ onBack }: { onBack: () => void }) {
   const answer = picked.map((i) => scrambled[i]).join('');
   const filled = picked.length === word.word.length;
   const solved = filled && answer === word.word;
+  useEffect(() => {
+    if (solved) onWin();
+  }, [solved, onWin]);
 
   function goNext() {
     const next = index + 1;
@@ -2387,7 +2472,7 @@ function ScrambleGame({ onBack }: { onBack: () => void }) {
   );
 }
 
-function MatchGame({ onBack }: { onBack: () => void }) {
+function MatchGame({ onBack, onWin }: { onBack: () => void; onWin: () => void }) {
   const theme = useTheme();
   const styles = useMemo(() => makeStyles(theme), [theme]);
   const [meanings] = useState(() => shuffle(matchPairs));
@@ -2395,6 +2480,9 @@ function MatchGame({ onBack }: { onBack: () => void }) {
   const [matched, setMatched] = useState<string[]>([]);
   const [wrong, setWrong] = useState<string | null>(null);
   const allDone = matched.length === matchPairs.length;
+  useEffect(() => {
+    if (allDone) onWin();
+  }, [allDone, onWin]);
 
   function tapMeaning(term: string) {
     if (matched.includes(term)) return;
@@ -2456,6 +2544,605 @@ function MatchGame({ onBack }: { onBack: () => void }) {
         <View style={styles.gameWin}>
           <CheckCircle2 size={theme.icon(24)} color={theme.colors.low} strokeWidth={2.2} />
           <Text style={styles.gameWinText}>All matched — well done!</Text>
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+// Side drawer that slides in from the right, with a fading dark overlay.
+function SideDrawer({ visible, onClose, children }: { visible: boolean; onClose: () => void; children: React.ReactNode }) {
+  const theme = useTheme();
+  const styles = useMemo(() => makeStyles(theme), [theme]);
+  const [mounted, setMounted] = useState(visible);
+  const anim = useRef(new Animated.Value(0)).current;
+  const panelW = Math.min(360, Math.round(Dimensions.get('window').width * 0.84));
+
+  useEffect(() => {
+    if (visible) {
+      setMounted(true);
+      Animated.timing(anim, { toValue: 1, duration: theme.reducedMotion ? 0 : 300, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start();
+    } else {
+      Animated.timing(anim, { toValue: 0, duration: theme.reducedMotion ? 0 : 220, easing: Easing.in(Easing.cubic), useNativeDriver: true }).start(({ finished }) => {
+        if (finished) setMounted(false);
+      });
+    }
+  }, [visible, anim, theme.reducedMotion]);
+
+  if (!mounted) return null;
+  const translateX = anim.interpolate({ inputRange: [0, 1], outputRange: [panelW + 40, 0] });
+
+  return (
+    <Modal visible transparent animationType="none" onRequestClose={onClose}>
+      <Animated.View style={[styles.drawerOverlay, { opacity: anim }]}>
+        <Pressable style={{ flex: 1 }} onPress={onClose} accessibilityLabel="Close menu" />
+      </Animated.View>
+      <Animated.View style={[styles.drawerPanel, { width: panelW, transform: [{ translateX }] }]}>{children}</Animated.View>
+    </Modal>
+  );
+}
+
+// Entrance animation: fade + slide up on mount, with optional stagger delay.
+function Reveal({ children, delay = 0, style }: { children: React.ReactNode; delay?: number; style?: object }) {
+  const theme = useTheme();
+  const a = useRef(new Animated.Value(theme.reducedMotion ? 1 : 0)).current;
+  useEffect(() => {
+    if (theme.reducedMotion) {
+      a.setValue(1);
+      return;
+    }
+    const anim = Animated.timing(a, { toValue: 1, duration: 400, delay, easing: Easing.out(Easing.cubic), useNativeDriver: true });
+    anim.start();
+    return () => anim.stop();
+  }, [a, delay, theme.reducedMotion]);
+  return (
+    <Animated.View style={[style, { opacity: a, transform: [{ translateY: a.interpolate({ inputRange: [0, 1], outputRange: [16, 0] }) }] }]}>
+      {children}
+    </Animated.View>
+  );
+}
+
+function StreakBanner({ streak, best }: { streak: number; best: number }) {
+  const theme = useTheme();
+  const styles = useMemo(() => makeStyles(theme), [theme]);
+  const pulse = useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    if (theme.reducedMotion || streak <= 0) return;
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, { toValue: 1.14, duration: 720, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+        Animated.timing(pulse, { toValue: 1, duration: 720, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [pulse, streak, theme.reducedMotion]);
+  return (
+    <View style={styles.streakBanner}>
+      <Animated.View style={[styles.streakFlame, { transform: [{ scale: pulse }] }]}>
+        <Flame size={theme.icon(30)} color={theme.colors.white} strokeWidth={2} />
+      </Animated.View>
+      <View style={{ flex: 1 }}>
+        <Text style={styles.streakNumber}>{streak > 0 ? `${streak}-week streak` : 'Start your streak'}</Text>
+        <Text style={styles.streakSub}>
+          {streak > 0 ? `Best: ${best} week${best === 1 ? '' : 's'} · play this week to keep it` : 'Play any game this week to begin'}
+        </Text>
+      </View>
+    </View>
+  );
+}
+
+function GameTile({ icon: Icon, title, tone, onPress }: { icon: LucideIcon; title: string; tone: number; onPress: () => void }) {
+  const theme = useTheme();
+  const styles = useMemo(() => makeStyles(theme), [theme]);
+  const scale = useRef(new Animated.Value(1)).current;
+  const press = (to: number) => {
+    if (theme.reducedMotion) return;
+    Animated.spring(scale, { toValue: to, useNativeDriver: true, speed: 40, bounciness: 6 }).start();
+  };
+  const tints = [theme.colors.brandTint, theme.colors.infoTint, theme.colors.accentTint, theme.colors.warnTint];
+  const fgs = [theme.colors.brand, theme.colors.info, theme.colors.accent, theme.colors.warn];
+  return (
+    <Animated.View style={{ transform: [{ scale }] }}>
+      <Pressable style={styles.gameTile} onPress={onPress} onPressIn={() => press(0.95)} onPressOut={() => press(1)} accessibilityRole="button" accessibilityLabel={title}>
+        <View style={[styles.gameTileIcon, { backgroundColor: tints[tone % 4] }]}>
+          <Icon size={theme.icon(32)} color={fgs[tone % 4]} strokeWidth={2} />
+        </View>
+        <Text style={styles.gameTileTitle}>{title}</Text>
+      </Pressable>
+    </Animated.View>
+  );
+}
+
+function GameHeader({ title, onBack }: { title: string; onBack: () => void }) {
+  const theme = useTheme();
+  const styles = useMemo(() => makeStyles(theme), [theme]);
+  return (
+    <>
+      <TouchableOpacity style={styles.gameBack} onPress={onBack} accessibilityRole="button">
+        <ChevronLeft size={theme.icon(22)} color={theme.colors.brand} strokeWidth={2.2} />
+        <Text style={styles.gameBackText}>All games</Text>
+      </TouchableOpacity>
+      <Text style={styles.gameHeading}>{title}</Text>
+    </>
+  );
+}
+
+function GameResult({ score, total, onReplay, onBack }: { score: number; total: number; onReplay: () => void; onBack: () => void }) {
+  const theme = useTheme();
+  const styles = useMemo(() => makeStyles(theme), [theme]);
+  const pct = total ? Math.round((score / total) * 100) : 0;
+  const great = pct >= 70;
+  return (
+    <View style={{ gap: theme.space.lg }}>
+      <View style={styles.resultBox}>
+        <View style={[styles.resultIcon, { backgroundColor: great ? theme.colors.lowTint : theme.colors.warnTint }]}>
+          {great ? <Trophy size={theme.icon(44)} color={theme.colors.low} strokeWidth={2.2} /> : <Flame size={theme.icon(44)} color={theme.colors.warn} strokeWidth={2.2} />}
+        </View>
+        <Text style={styles.resultScore}>{score} / {total}</Text>
+        <Text style={styles.resultTitle}>{great ? 'Great job!' : 'Nice effort!'}</Text>
+        <Text style={styles.resultText}>You earned this week’s streak. Come back next week to keep it growing.</Text>
+      </View>
+      <Btn label="Play again" icon={Shuffle} onPress={onReplay} />
+      <Btn label="All games" variant="secondary" icon={ChevronLeft} onPress={onBack} />
+    </View>
+  );
+}
+
+function CrosswordGame({ onBack, onWin }: { onBack: () => void; onWin: () => void }) {
+  const theme = useTheme();
+  const styles = useMemo(() => makeStyles(theme), [theme]);
+  const { solution, numberAt, cellsForClue } = useMemo(() => buildCrossword(), []);
+  const inputRef = useRef<TextInput>(null);
+  const [cells, setCells] = useState<Record<string, string>>({});
+  const [activeIdx, setActiveIdx] = useState(0);
+
+  const activeClue = crosswordClues[activeIdx];
+  const activeCells = cellsForClue[`${activeClue.number}-${activeClue.direction}`];
+  const activeValue = activeCells.map((k) => cells[k] ?? '').join('');
+  const solved = Object.keys(solution).every((k) => (cells[k] ?? '') === solution[k]);
+  useEffect(() => {
+    if (solved) onWin();
+  }, [solved, onWin]);
+
+  function onType(text: string) {
+    const clean = text.toUpperCase().replace(/[^A-Z]/g, '').slice(0, activeCells.length);
+    setCells((prev) => {
+      const next = { ...prev };
+      activeCells.forEach((k, i) => {
+        next[k] = clean[i] ?? '';
+      });
+      return next;
+    });
+  }
+
+  function selectCell(r: number, c: number) {
+    const k = cellKey(r, c);
+    const matches = crosswordClues
+      .map((cl, i) => ({ i, cells: cellsForClue[`${cl.number}-${cl.direction}`] }))
+      .filter((m) => m.cells.includes(k))
+      .map((m) => m.i);
+    if (!matches.length) return;
+    const other = matches.find((i) => i !== activeIdx);
+    setActiveIdx(activeCells.includes(k) && other != null ? other : matches[0]);
+    inputRef.current?.focus();
+  }
+
+  return (
+    <View style={styles.stack}>
+      <GameHeader title="Crossword" onBack={onBack} />
+      <Text style={styles.screenIntro}>Tap a clue, then type its answer. Fill every square to win.</Text>
+
+      <View style={styles.crossGrid}>
+        {Array.from({ length: crosswordSize }).map((_, r) => (
+          <View key={r} style={styles.crossRow}>
+            {Array.from({ length: crosswordSize }).map((_, c) => {
+              const k = cellKey(r, c);
+              if (solution[k] == null) return <View key={c} style={styles.crossBlank} />;
+              const active = activeCells.includes(k);
+              const letter = cells[k] ?? '';
+              const correct = solved || (letter !== '' && letter === solution[k]);
+              return (
+                <TouchableOpacity
+                  key={c}
+                  style={[styles.crossCell, active && styles.crossCellActive, correct && styles.crossCellCorrect]}
+                  onPress={() => selectCell(r, c)}
+                  activeOpacity={0.8}
+                >
+                  {numberAt[k] ? <Text style={styles.crossNum}>{numberAt[k]}</Text> : null}
+                  <Text style={styles.crossLetter}>{letter}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        ))}
+      </View>
+
+      <TextInput
+        ref={inputRef}
+        style={styles.crossInput}
+        value={activeValue}
+        onChangeText={onType}
+        autoCapitalize="characters"
+        autoCorrect={false}
+        maxLength={activeCells.length}
+        placeholder={`Answer for ${activeClue.number} ${activeClue.direction}`}
+        placeholderTextColor={theme.colors.faint}
+      />
+
+      <View style={{ gap: theme.space.sm }}>
+        {crosswordClues.map((cl, i) => {
+          const done = cellsForClue[`${cl.number}-${cl.direction}`].every((k) => (cells[k] ?? '') === solution[k]);
+          return (
+            <TouchableOpacity
+              key={`${cl.number}-${cl.direction}`}
+              onPress={() => {
+                setActiveIdx(i);
+                inputRef.current?.focus();
+              }}
+              style={[styles.clueRow, i === activeIdx && styles.clueRowActive]}
+              accessibilityRole="button"
+            >
+              <Text style={styles.clueNum}>
+                {cl.number} {cl.direction === 'across' ? 'Across' : 'Down'}
+              </Text>
+              <Text style={[styles.clueText, done && { color: theme.colors.low }]}>
+                {cl.clue}
+                {done ? '  ✓' : ''}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+
+      {solved ? (
+        <View style={styles.gameWin}>
+          <CheckCircle2 size={theme.icon(24)} color={theme.colors.low} strokeWidth={2.2} />
+          <Text style={styles.gameWinText}>Solved — well done!</Text>
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+function TrueFalseGame({ onBack, onWin }: { onBack: () => void; onWin: () => void }) {
+  const theme = useTheme();
+  const styles = useMemo(() => makeStyles(theme), [theme]);
+  const [items] = useState(() => shuffle(trueFalseItems));
+  const [idx, setIdx] = useState(0);
+  const [choice, setChoice] = useState<boolean | null>(null);
+  const [correct, setCorrect] = useState(0);
+  const [finished, setFinished] = useState(false);
+  useEffect(() => {
+    if (finished) onWin();
+  }, [finished, onWin]);
+
+  if (finished) {
+    return (
+      <View style={styles.stack}>
+        <GameHeader title="True or False" onBack={onBack} />
+        <GameResult
+          score={correct}
+          total={items.length}
+          onReplay={() => {
+            setIdx(0);
+            setChoice(null);
+            setCorrect(0);
+            setFinished(false);
+          }}
+          onBack={onBack}
+        />
+      </View>
+    );
+  }
+
+  const item = items[idx];
+  const answered = choice !== null;
+  const right = choice === item.answer;
+
+  return (
+    <View style={styles.stack}>
+      <GameHeader title="True or False" onBack={onBack} />
+      <Text style={styles.gameCounter}>Question {idx + 1} of {items.length}</Text>
+      <View style={styles.tfCard}>
+        <Text style={styles.tfStatement}>{item.statement}</Text>
+      </View>
+      <View style={styles.tfButtons}>
+        <TouchableOpacity
+          style={[styles.tfBtn, answered && item.answer === true && styles.tfBtnCorrect, answered && choice === true && item.answer !== true && styles.tfBtnWrong]}
+          disabled={answered}
+          onPress={() => {
+            setChoice(true);
+            if (item.answer === true) setCorrect((c) => c + 1);
+          }}
+        >
+          <CheckCircle2 size={theme.icon(26)} color={theme.colors.low} strokeWidth={2.2} />
+          <Text style={styles.tfBtnText}>True</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.tfBtn, answered && item.answer === false && styles.tfBtnCorrect, answered && choice === false && item.answer !== false && styles.tfBtnWrong]}
+          disabled={answered}
+          onPress={() => {
+            setChoice(false);
+            if (item.answer === false) setCorrect((c) => c + 1);
+          }}
+        >
+          <X size={theme.icon(26)} color={theme.colors.danger} strokeWidth={2.2} />
+          <Text style={styles.tfBtnText}>False</Text>
+        </TouchableOpacity>
+      </View>
+      {answered ? (
+        <View style={[styles.quizFeedback, { borderColor: right ? theme.colors.low : theme.colors.high }]}>
+          <Text style={[styles.quizFeedbackTitle, { color: right ? theme.colors.low : theme.colors.high }]}>{right ? 'Correct!' : 'Not quite'}</Text>
+          <Text style={styles.cardBody}>{item.why}</Text>
+        </View>
+      ) : null}
+      {answered ? (
+        <Btn
+          label={idx === items.length - 1 ? 'See my score' : 'Next'}
+          icon={ChevronRight}
+          onPress={() => {
+            if (idx === items.length - 1) setFinished(true);
+            else {
+              setIdx((i) => i + 1);
+              setChoice(null);
+            }
+          }}
+        />
+      ) : null}
+    </View>
+  );
+}
+
+function FillBlankGame({ onBack, onWin }: { onBack: () => void; onWin: () => void }) {
+  const theme = useTheme();
+  const styles = useMemo(() => makeStyles(theme), [theme]);
+  const [items] = useState(() => shuffle(fillBlankItems).map((it) => ({ ...it, options: shuffle(it.options) })));
+  const [idx, setIdx] = useState(0);
+  const [choice, setChoice] = useState<string | null>(null);
+  const [correct, setCorrect] = useState(0);
+  const [finished, setFinished] = useState(false);
+  useEffect(() => {
+    if (finished) onWin();
+  }, [finished, onWin]);
+
+  if (finished) {
+    return (
+      <View style={styles.stack}>
+        <GameHeader title="Fill the Blank" onBack={onBack} />
+        <GameResult
+          score={correct}
+          total={items.length}
+          onReplay={() => {
+            setIdx(0);
+            setChoice(null);
+            setCorrect(0);
+            setFinished(false);
+          }}
+          onBack={onBack}
+        />
+      </View>
+    );
+  }
+
+  const item = items[idx];
+  const answered = choice !== null;
+
+  return (
+    <View style={styles.stack}>
+      <GameHeader title="Fill the Blank" onBack={onBack} />
+      <Text style={styles.gameCounter}>Question {idx + 1} of {items.length}</Text>
+      <View style={styles.tfCard}>
+        <Text style={styles.fillSentence}>
+          {item.before} <Text style={styles.fillBlankMark}>{answered ? item.answer : '_____'}</Text> {item.after}
+        </Text>
+      </View>
+      <View style={{ gap: theme.space.sm }}>
+        {item.options.map((opt) => {
+          const isRight = opt === item.answer;
+          const chosen = choice === opt;
+          return (
+            <TouchableOpacity
+              key={opt}
+              disabled={answered}
+              style={[
+                styles.fillOption,
+                answered && isRight && { borderColor: theme.colors.low, backgroundColor: theme.colors.lowTint },
+                answered && chosen && !isRight && { borderColor: theme.colors.danger, backgroundColor: theme.colors.dangerTint },
+              ]}
+              onPress={() => {
+                setChoice(opt);
+                if (isRight) setCorrect((c) => c + 1);
+              }}
+              accessibilityRole="button"
+            >
+              {answered && isRight ? (
+                <CheckCircle2 size={theme.icon(20)} color={theme.colors.low} strokeWidth={2.2} />
+              ) : answered && chosen ? (
+                <X size={theme.icon(20)} color={theme.colors.danger} strokeWidth={2.2} />
+              ) : (
+                <Circle size={theme.icon(20)} color={theme.colors.muted} strokeWidth={2} />
+              )}
+              <Text style={styles.fillOptionText}>{opt}</Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+      {answered ? (
+        <Btn
+          label={idx === items.length - 1 ? 'See my score' : 'Next'}
+          icon={ChevronRight}
+          onPress={() => {
+            if (idx === items.length - 1) setFinished(true);
+            else {
+              setIdx((i) => i + 1);
+              setChoice(null);
+            }
+          }}
+        />
+      ) : null}
+    </View>
+  );
+}
+
+function RedFlagGame({ onBack, onWin }: { onBack: () => void; onWin: () => void }) {
+  const theme = useTheme();
+  const styles = useMemo(() => makeStyles(theme), [theme]);
+  const [items] = useState(() => shuffle(redFlagItems));
+  const [idx, setIdx] = useState(0);
+  const [choice, setChoice] = useState<boolean | null>(null);
+  const [correct, setCorrect] = useState(0);
+  const [finished, setFinished] = useState(false);
+  useEffect(() => {
+    if (finished) onWin();
+  }, [finished, onWin]);
+
+  if (finished) {
+    return (
+      <View style={styles.stack}>
+        <GameHeader title="Red Flag Rush" onBack={onBack} />
+        <GameResult
+          score={correct}
+          total={items.length}
+          onReplay={() => {
+            setIdx(0);
+            setChoice(null);
+            setCorrect(0);
+            setFinished(false);
+          }}
+          onBack={onBack}
+        />
+      </View>
+    );
+  }
+
+  const item = items[idx];
+  const answered = choice !== null;
+  const right = choice === item.scam;
+
+  return (
+    <View style={styles.stack}>
+      <GameHeader title="Red Flag Rush" onBack={onBack} />
+      <Text style={styles.gameCounter}>{idx + 1} of {items.length} · Is it a scam?</Text>
+      <View style={styles.rfCard}>
+        <Text style={styles.rfText}>{item.text}</Text>
+      </View>
+      <View style={styles.tfButtons}>
+        <TouchableOpacity
+          style={[styles.tfBtn, answered && item.scam === true && styles.tfBtnCorrect, answered && choice === true && !item.scam && styles.tfBtnWrong]}
+          disabled={answered}
+          onPress={() => {
+            setChoice(true);
+            if (item.scam) setCorrect((c) => c + 1);
+          }}
+        >
+          <Flag size={theme.icon(26)} color={theme.colors.danger} strokeWidth={2.2} />
+          <Text style={styles.tfBtnText}>Scam</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.tfBtn, answered && item.scam === false && styles.tfBtnCorrect, answered && choice === false && item.scam && styles.tfBtnWrong]}
+          disabled={answered}
+          onPress={() => {
+            setChoice(false);
+            if (!item.scam) setCorrect((c) => c + 1);
+          }}
+        >
+          <ShieldCheck size={theme.icon(26)} color={theme.colors.low} strokeWidth={2.2} />
+          <Text style={styles.tfBtnText}>Safe</Text>
+        </TouchableOpacity>
+      </View>
+      {answered ? (
+        <View style={[styles.quizFeedback, { borderColor: right ? theme.colors.low : theme.colors.high }]}>
+          <Text style={[styles.quizFeedbackTitle, { color: right ? theme.colors.low : theme.colors.high }]}>{right ? 'Correct!' : item.scam ? 'This one was a scam' : 'This one was safe'}</Text>
+        </View>
+      ) : null}
+      {answered ? (
+        <Btn
+          label={idx === items.length - 1 ? 'See my score' : 'Next'}
+          icon={ChevronRight}
+          onPress={() => {
+            if (idx === items.length - 1) setFinished(true);
+            else {
+              setIdx((i) => i + 1);
+              setChoice(null);
+            }
+          }}
+        />
+      ) : null}
+    </View>
+  );
+}
+
+interface MemoryCard {
+  id: string;
+  term: string;
+}
+
+function MemoryGame({ onBack, onWin }: { onBack: () => void; onWin: () => void }) {
+  const theme = useTheme();
+  const styles = useMemo(() => makeStyles(theme), [theme]);
+  const [deck] = useState<MemoryCard[]>(() => shuffle(memoryTerms.flatMap((t) => [{ id: `${t}-a`, term: t }, { id: `${t}-b`, term: t }])));
+  const [flipped, setFlipped] = useState<string[]>([]);
+  const [matched, setMatched] = useState<string[]>([]);
+  const [moves, setMoves] = useState(0);
+  const busy = useRef(false);
+  const allDone = matched.length === memoryTerms.length;
+  useEffect(() => {
+    if (allDone) onWin();
+  }, [allDone, onWin]);
+
+  function tap(card: MemoryCard) {
+    if (busy.current || matched.includes(card.term) || flipped.includes(card.id) || flipped.length === 2) return;
+    const nextFlipped = [...flipped, card.id];
+    setFlipped(nextFlipped);
+    if (nextFlipped.length === 2) {
+      setMoves((m) => m + 1);
+      const [a, b] = nextFlipped;
+      const termA = deck.find((c) => c.id === a)?.term;
+      const termB = deck.find((c) => c.id === b)?.term;
+      if (termA && termA === termB) {
+        setMatched((m) => [...m, termA]);
+        setFlipped([]);
+      } else {
+        busy.current = true;
+        setTimeout(() => {
+          setFlipped([]);
+          busy.current = false;
+        }, 900);
+      }
+    }
+  }
+
+  return (
+    <View style={styles.stack}>
+      <GameHeader title="Memory Match" onBack={onBack} />
+      <Text style={styles.gameCounter}>Find the matching pairs · {moves} move{moves === 1 ? '' : 's'}</Text>
+      <View style={styles.memGrid}>
+        {deck.map((card) => {
+          const show = flipped.includes(card.id) || matched.includes(card.term);
+          const done = matched.includes(card.term);
+          return (
+            <TouchableOpacity
+              key={card.id}
+              style={[styles.memCard, show && styles.memCardUp, done && styles.memCardDone]}
+              onPress={() => tap(card)}
+              activeOpacity={0.85}
+              accessibilityRole="button"
+              accessibilityLabel={show ? card.term : 'hidden card'}
+            >
+              {show ? (
+                <Text style={[styles.memCardText, done && { color: theme.colors.onBrand }]}>{card.term}</Text>
+              ) : (
+                <ShieldCheck size={theme.icon(28)} color={theme.colors.faint} strokeWidth={2} />
+              )}
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+      {allDone ? (
+        <View style={styles.gameWin}>
+          <CheckCircle2 size={theme.icon(24)} color={theme.colors.low} strokeWidth={2.2} />
+          <Text style={styles.gameWinText}>All pairs found in {moves} moves!</Text>
         </View>
       ) : null}
     </View>
@@ -2712,7 +3399,7 @@ function makeStyles(t: Theme) {
       paddingBottom: Platform.OS === 'ios' ? 30 : t.space.lg,
       paddingHorizontal: t.space.sm,
     },
-    navItem: { flex: 1, alignItems: 'center', gap: 5 },
+    navItem: { flex: 1, alignItems: 'center', gap: 6, paddingVertical: 2 },
     navIconWrap: { width: t.tap(66), height: t.tap(44), borderRadius: t.radius.pill, alignItems: 'center', justifyContent: 'center' },
     navIconWrapActive: { backgroundColor: t.colors.brandTint },
     navBadge: {
@@ -2891,6 +3578,75 @@ function makeStyles(t: Theme) {
     matchChipWrong: { borderColor: t.colors.danger, backgroundColor: t.colors.dangerTint },
     matchChipText: { fontSize: t.font('bodySm'), fontWeight: t.weight.bold, color: t.colors.ink, textAlign: 'center' },
     matchMeaningText: { fontSize: t.font('label'), fontWeight: t.weight.medium, color: t.colors.ink, textAlign: 'center', lineHeight: t.lineHeight('label') },
+
+    // Streak + game hub -----------------------------------------------------
+    streakBanner: { flexDirection: 'row', alignItems: 'center', gap: t.space.md, backgroundColor: t.colors.brand, borderRadius: t.radius.lg, padding: t.space.lg, ...t.shadow('card') },
+    streakFlame: { width: t.tap(52), height: t.tap(52), borderRadius: t.radius.pill, backgroundColor: 'rgba(255,255,255,0.18)', alignItems: 'center', justifyContent: 'center' },
+    streakNumber: { fontSize: t.font('h2'), fontWeight: t.weight.bold, color: t.colors.onBrand, letterSpacing: -0.3 },
+    streakSub: { fontSize: t.font('label'), color: 'rgba(255,255,255,0.9)', fontWeight: t.weight.medium, marginTop: 1 },
+    homeStreakChip: { flexDirection: 'row', alignItems: 'center', gap: t.space.md, backgroundColor: t.colors.brandTint, borderRadius: t.radius.md, borderWidth: 1, borderColor: t.colors.brandTintSoft, paddingVertical: t.space.md, paddingHorizontal: t.space.lg },
+    homeStreakIcon: { width: t.tap(38), height: t.tap(38), borderRadius: t.radius.pill, backgroundColor: t.colors.brand, alignItems: 'center', justifyContent: 'center' },
+    homeStreakText: { flex: 1, fontSize: t.font('bodySm'), fontWeight: t.weight.bold, color: t.colors.brandDark },
+    gameTileWrap: { width: '48%' },
+    gameTile: { backgroundColor: t.colors.surface, borderRadius: t.radius.lg, borderWidth: 1, borderColor: t.colors.line, paddingVertical: t.space.lg, paddingHorizontal: t.space.md, alignItems: 'center', gap: t.space.sm, minHeight: t.tap(128), justifyContent: 'center', ...t.shadow('soft') },
+    gameTileIcon: { width: t.tap(60), height: t.tap(60), borderRadius: t.radius.pill, alignItems: 'center', justifyContent: 'center' },
+    gameTileTitle: { fontSize: t.font('bodySm'), fontWeight: t.weight.bold, color: t.colors.ink, textAlign: 'center' },
+    gameCounter: { fontSize: t.font('label'), fontWeight: t.weight.bold, color: t.colors.brand, textTransform: 'uppercase', letterSpacing: 0.6 },
+
+    // Crossword -------------------------------------------------------------
+    crossGrid: { alignSelf: 'center', gap: 4 },
+    crossRow: { flexDirection: 'row', gap: 4 },
+    crossBlank: { width: t.tap(52), height: t.tap(52) },
+    crossCell: { width: t.tap(52), height: t.tap(52), borderRadius: t.radius.xs, borderWidth: 1.5, borderColor: t.colors.lineStrong, backgroundColor: t.colors.surface, alignItems: 'center', justifyContent: 'center' },
+    crossCellActive: { borderColor: t.colors.brand, backgroundColor: t.colors.brandTintSoft },
+    crossCellCorrect: { borderColor: t.colors.low, backgroundColor: t.colors.lowTint },
+    crossNum: { position: 'absolute', top: 2, left: 3, fontSize: 10, fontWeight: t.weight.bold, color: t.colors.muted },
+    crossLetter: { fontSize: t.font('h3'), fontWeight: t.weight.bold, color: t.colors.ink },
+    crossInput: { backgroundColor: t.colors.surface, borderWidth: 1.5, borderColor: t.colors.lineStrong, borderRadius: t.radius.md, paddingHorizontal: t.space.lg, minHeight: t.tap(54), fontSize: t.font('body'), color: t.colors.ink, letterSpacing: 2, textAlign: 'center' },
+    clueRow: { backgroundColor: t.colors.surface, borderRadius: t.radius.md, borderWidth: 1, borderColor: t.colors.line, padding: t.space.md, gap: 2 },
+    clueRowActive: { borderColor: t.colors.brand, backgroundColor: t.colors.brandTintSoft },
+    clueNum: { fontSize: t.font('tiny'), fontWeight: t.weight.bold, color: t.colors.brand, textTransform: 'uppercase', letterSpacing: 0.6 },
+    clueText: { fontSize: t.font('bodySm'), fontWeight: t.weight.medium, color: t.colors.ink, lineHeight: t.lineHeight('bodySm') },
+
+    // True/False, Red Flag --------------------------------------------------
+    tfCard: { backgroundColor: t.colors.surface, borderRadius: t.radius.lg, borderWidth: 1, borderColor: t.colors.line, padding: t.space.xl, ...t.shadow('soft') },
+    tfStatement: { fontSize: t.font('h3'), fontWeight: t.weight.semibold, color: t.colors.ink, lineHeight: t.lineHeight('h3') },
+    tfButtons: { flexDirection: 'row', gap: t.space.md },
+    tfBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: t.space.sm, minHeight: t.tap(64), borderRadius: t.radius.md, borderWidth: 1.5, borderColor: t.colors.line, backgroundColor: t.colors.surface },
+    tfBtnCorrect: { borderColor: t.colors.low, backgroundColor: t.colors.lowTint },
+    tfBtnWrong: { borderColor: t.colors.danger, backgroundColor: t.colors.dangerTint },
+    tfBtnText: { fontSize: t.font('body'), fontWeight: t.weight.bold, color: t.colors.ink },
+    rfCard: { backgroundColor: t.colors.surface, borderRadius: t.radius.lg, borderWidth: 1, borderColor: t.colors.line, padding: t.space.xl, minHeight: t.tap(120), justifyContent: 'center', ...t.shadow('soft') },
+    rfText: { fontSize: t.font('h3'), fontWeight: t.weight.medium, color: t.colors.ink, lineHeight: t.lineHeight('h3'), textAlign: 'center' },
+
+    // Fill the blank --------------------------------------------------------
+    fillSentence: { fontSize: t.font('h3'), fontWeight: t.weight.medium, color: t.colors.ink, lineHeight: t.lineHeight('h2') },
+    fillBlankMark: { fontWeight: t.weight.bold, color: t.colors.brand },
+    fillOption: { flexDirection: 'row', alignItems: 'center', gap: t.space.sm, minHeight: t.tap(56), borderWidth: 1.5, borderColor: t.colors.line, borderRadius: t.radius.md, backgroundColor: t.colors.surface, paddingHorizontal: t.space.lg },
+    fillOptionText: { flex: 1, fontSize: t.font('body'), fontWeight: t.weight.semibold, color: t.colors.ink },
+
+    // Memory match ----------------------------------------------------------
+    memGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: t.space.sm, justifyContent: 'center' },
+    memCard: { width: '30%', aspectRatio: 1, borderRadius: t.radius.md, borderWidth: 1.5, borderColor: t.colors.line, backgroundColor: t.colors.surfaceMuted, alignItems: 'center', justifyContent: 'center', padding: 4 },
+    memCardUp: { backgroundColor: t.colors.brandTintSoft, borderColor: t.colors.brand },
+    memCardDone: { backgroundColor: t.colors.low, borderColor: t.colors.low },
+    memCardText: { fontSize: t.font('bodySm'), fontWeight: t.weight.bold, color: t.colors.ink, textAlign: 'center' },
+
+    // Side drawer -----------------------------------------------------------
+    drawerOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: t.colors.overlay },
+    drawerPanel: { position: 'absolute', top: 0, right: 0, bottom: 0, backgroundColor: t.colors.bg, borderTopLeftRadius: t.radius.xl, borderBottomLeftRadius: t.radius.xl, ...t.shadow('raised') },
+    drawerHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: t.space.md,
+      paddingTop: 56,
+      paddingBottom: t.space.md,
+      paddingHorizontal: t.space.lg,
+      borderBottomWidth: 1,
+      borderBottomColor: t.colors.line,
+    },
+    drawerLogo: { width: t.tap(40), height: t.tap(40), borderRadius: t.radius.sm, backgroundColor: t.colors.brand, alignItems: 'center', justifyContent: 'center' },
+    drawerTitle: { flex: 1, fontSize: t.font('h2'), fontWeight: t.weight.bold, color: t.colors.ink, letterSpacing: -0.3 },
 
     modalScreen: { flex: 1, backgroundColor: t.colors.bg },
     modalHeader: {
