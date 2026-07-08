@@ -10,7 +10,6 @@ import {
   BookOpen,
   Camera,
   CheckCircle2,
-  ChevronDown,
   ChevronRight,
   Circle,
   CreditCard,
@@ -18,9 +17,11 @@ import {
   FileAudio,
   GraduationCap,
   Home,
+  ChevronLeft,
   LayoutGrid,
   LifeBuoy,
   Link as LinkIcon,
+  Lock,
   Mail,
   MessageCircle,
   Mic,
@@ -33,6 +34,7 @@ import {
   ShieldAlert,
   ShieldCheck,
   Siren,
+  Sparkles,
   Trophy,
   Upload,
   Users,
@@ -62,7 +64,7 @@ import {
 import type { DimensionValue, ImageStyle } from 'react-native';
 
 import { emergencySteps, practiceExamples, recoverySteps, trustedContactMessage } from './src/data/content';
-import { modulesForDifficulty } from './src/data/curriculum';
+import { daysUntilUnlock, isWeekUnlocked, modulesForDifficulty, weeklyModules } from './src/data/curriculum';
 import { isAiReviewConfigured, reviewScamWithAi } from './src/services/aiScamReview';
 import { analyzeCallRisk } from './src/services/callRisk';
 import {
@@ -124,7 +126,8 @@ type Screen =
   | 'phone'
   | 'voicemail'
   | 'activity'
-  | 'settings';
+  | 'settings'
+  | 'lesson';
 
 type ToggleState = Record<string, boolean>;
 
@@ -151,49 +154,53 @@ const screenTitles: Record<Screen, string> = {
   voicemail: 'Voicemail',
   activity: 'Activity',
   settings: 'Settings',
+  lesson: 'Lesson',
 };
 
 type ToolAction = { screen: Screen; label: string; detail: string; icon: LucideIcon; tone?: RiskLevel };
 
-const toolGroups: Array<{ title: string; items: ToolAction[] }> = [
+type ToolGroup = { title: string; subtitle: string; icon: LucideIcon; items: ToolAction[] };
+
+const toolGroups: ToolGroup[] = [
   {
-    title: 'Before you reply',
+    title: 'Something you received',
+    subtitle: 'A text, email, or call',
+    icon: MessageCircle,
     items: [
-      { screen: 'scam', label: 'Message or email', detail: 'Paste the words', icon: ShieldCheck },
-      { screen: 'call', label: 'Phone call', detail: 'Answer yes or no', icon: PhoneCall },
-      { screen: 'voicemail', label: 'Voicemail', detail: 'Add notes from the call', icon: FileAudio },
+      { screen: 'scam', label: 'Message or email', detail: 'Paste the words and check them', icon: MessageCircle },
+      { screen: 'call', label: 'Phone call', detail: 'Answer a few yes / no questions', icon: PhoneCall },
+      { screen: 'voicemail', label: 'Voicemail', detail: 'Check what was left on your phone', icon: FileAudio },
     ],
   },
   {
-    title: 'Before you open',
+    title: 'Before you open or tap',
+    subtitle: 'Links, codes, and numbers',
+    icon: LinkIcon,
     items: [
-      { screen: 'link', label: 'Link', detail: 'Check the address', icon: LinkIcon },
-      { screen: 'qr', label: 'QR code', detail: 'Preview the destination', icon: QrCode },
-      { screen: 'phone', label: 'Phone number', detail: 'Check for spoofing', icon: Search },
+      { screen: 'link', label: 'A link', detail: 'Check the address first', icon: LinkIcon },
+      { screen: 'qr', label: 'A QR code', detail: 'Preview where it really goes', icon: QrCode },
+      { screen: 'phone', label: 'A phone number', detail: 'Check for spoofing', icon: Search },
     ],
   },
   {
-    title: 'Money or family',
+    title: 'Money and family',
+    subtitle: 'Payments and urgent calls',
+    icon: CreditCard,
     items: [
-      { screen: 'voice', label: 'Family voice', detail: 'Use your phrase', icon: Mic },
-      { screen: 'payment', label: 'Before you pay', detail: 'Check the payment type', icon: CreditCard },
-      { screen: 'recovery', label: 'Already clicked or paid', detail: 'Start here', icon: LifeBuoy, tone: 'high' },
-    ],
-  },
-  {
-    title: 'Keep learning',
-    items: [
-      { screen: 'practice', label: 'Quiz', detail: 'Practice with examples', icon: Trophy },
-      { screen: 'news', label: 'Scam alerts', detail: 'Current scam patterns', icon: Newspaper },
+      { screen: 'payment', label: 'Before you pay', detail: 'Check how they want to be paid', icon: CreditCard },
+      { screen: 'voice', label: 'A family emergency call', detail: 'Use your family phrase', icon: Mic },
+      { screen: 'recovery', label: 'I already clicked or paid', detail: 'Steps to recover', icon: LifeBuoy, tone: 'high' },
     ],
   },
 ];
 
 const homeQuickChecks: ToolAction[] = [
-  { screen: 'scam', label: 'Message', detail: 'Paste the words', icon: MessageCircle },
-  { screen: 'call', label: 'Phone call', detail: 'Yes / no check', icon: PhoneCall },
+  { screen: 'scam', label: 'Message', detail: 'Text or email', icon: MessageCircle },
+  { screen: 'call', label: 'Call', detail: 'Yes / no check', icon: PhoneCall },
   { screen: 'link', label: 'Link', detail: 'Before you tap', icon: LinkIcon },
   { screen: 'phone', label: 'Number', detail: 'Check spoofing', icon: Search },
+  { screen: 'payment', label: 'Payment', detail: 'Before you pay', icon: CreditCard },
+  { screen: 'tools', label: 'More', detail: 'All checks', icon: LayoutGrid },
 ];
 
 // --- Theme-aware risk color helpers ---------------------------------------
@@ -289,11 +296,12 @@ function Root() {
 function MainApp() {
   const theme = useTheme();
   const styles = useMemo(() => makeStyles(theme), [theme]);
-  const { profile, prefs, progress, detections, unreadCount, pushDetection, markAllDetectionsRead } = useApp();
+  const { profile, prefs, progress, detections, unreadCount, pushDetection, markAllDetectionsRead, walkthroughSeen, markWalkthroughSeen } = useApp();
 
   const scrollRef = useRef<ScrollView>(null);
   const screenAnim = useRef(new Animated.Value(1)).current;
   const [screen, setScreen] = useState<Screen>('home');
+  const [activeModuleId, setActiveModuleId] = useState<string | null>(null);
   const [contacts, setContacts] = useState<TrustedContact[]>([]);
   const [confidence, setConfidence] = useState<ConfidenceEntry[]>([]);
   const [familyPhrase, setFamilyPhrase] = useState('');
@@ -418,6 +426,18 @@ function MainApp() {
     setScreen(next);
     if (next !== 'qr') setScanning(false);
     if (next === 'activity') markAllDetectionsRead();
+  }
+
+  function openLesson(moduleId: string) {
+    setActiveModuleId(moduleId);
+    setScreen('lesson');
+    scrollRef.current?.scrollTo({ y: 0, animated: false });
+  }
+
+  function startWalkthroughLesson() {
+    markWalkthroughSeen();
+    const first = weeklyModules[0];
+    if (first) openLesson(first.id);
   }
 
   async function refreshAlerts() {
@@ -720,12 +740,14 @@ function MainApp() {
         </View>
       );
     }
+    const backTo: Screen = screen === 'lesson' || screen === 'practice' ? 'learn' : 'home';
+    const backLabel = backTo === 'learn' ? 'Learn' : 'Home';
     return (
       <View style={styles.header}>
         <View style={styles.headerNavRow}>
-          <TouchableOpacity style={styles.backButton} onPress={() => navigate('home')} activeOpacity={0.7} accessibilityLabel="Back to home">
-            <ChevronRight size={theme.icon(22)} color={theme.colors.brand} style={styles.backIcon} strokeWidth={2.6} />
-            <Text style={styles.backText}>Home</Text>
+          <TouchableOpacity style={styles.backButton} onPress={() => navigate(backTo)} activeOpacity={0.7} accessibilityLabel={`Back to ${backLabel}`}>
+            <ChevronLeft size={theme.icon(24)} color={theme.colors.brand} strokeWidth={2.8} />
+            <Text style={styles.backText}>{backLabel}</Text>
           </TouchableOpacity>
           <Text style={styles.title}>{screenTitles[screen]}</Text>
         </View>
@@ -749,7 +771,7 @@ function MainApp() {
           return (
             <TouchableOpacity key={item.screen} style={styles.navItem} onPress={() => navigate(item.screen)} activeOpacity={0.8} accessibilityRole="button" accessibilityState={{ selected: active }}>
               <View style={[styles.navIconWrap, active && styles.navIconWrapActive]}>
-                <Icon size={theme.icon(22)} color={active ? theme.colors.brand : theme.colors.muted} strokeWidth={active ? 2.5 : 2.1} />
+                <Icon size={theme.icon(30)} color={active ? theme.colors.brand : theme.colors.muted} strokeWidth={active ? 2.6 : 2.2} />
                 {item.badge ? (
                   <View style={styles.navBadge}>
                     <Text style={styles.navBadgeText}>{item.badge > 9 ? '9+' : item.badge}</Text>
@@ -765,17 +787,17 @@ function MainApp() {
   }
 
   function renderHome() {
-    const simple = prefs.accessibility.simplifiedLanguage;
-    const recent = detections.slice(0, 2);
-    return (
-      <View style={styles.stack}>
-        <View style={styles.homeHero}>
-          <Text style={styles.homeHeroTitle}>{simple ? 'Not sure? Check it.' : 'Not sure about it?\nLet’s check together.'}</Text>
-          <Text style={styles.homeHeroText}>
-            {simple ? 'Stop and check before you reply, pay, or tap a link.' : 'Slow down and take one clear step before you reply, pay, or tap a link.'}
-          </Text>
-        </View>
+    const modules = modulesForDifficulty(prefs.difficulty);
+    const createdAt = profile?.createdAt ?? new Date().toISOString();
+    const nextLesson =
+      modules.find((m) => isWeekUnlocked(createdAt, m.week) && !progress.completedWeeks.includes(m.id)) ??
+      modules.find((m) => !progress.completedWeeks.includes(m.id)) ??
+      modules[modules.length - 1];
+    const nextUnlocked = nextLesson ? isWeekUnlocked(createdAt, nextLesson.week) : false;
 
+    return (
+      <View style={styles.homeStack}>
+        {/* Big, clear help button — the most important action */}
         <TouchableOpacity
           style={styles.emergencyButton}
           activeOpacity={0.9}
@@ -787,43 +809,47 @@ function MainApp() {
           accessibilityLabel="I think this is a scam. Show safety steps."
         >
           <View style={styles.emergencyIcon}>
-            <Siren size={theme.icon(30)} color={theme.colors.onBrand} strokeWidth={2.6} />
+            <Siren size={theme.icon(34)} color={theme.colors.onBrand} strokeWidth={2.6} />
           </View>
           <View style={{ flex: 1 }}>
             <Text style={styles.emergencyTitle}>I think this is a scam</Text>
-            <Text style={styles.emergencySub}>Show me the safety steps</Text>
+            <Text style={styles.emergencySub}>Tap for safety steps</Text>
           </View>
-          <ChevronRight size={theme.icon(26)} color={theme.colors.onBrand} strokeWidth={2.4} />
+          <ChevronRight size={theme.icon(28)} color={theme.colors.onBrand} strokeWidth={2.6} />
         </TouchableOpacity>
 
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>Quick checks</Text>
-          <TouchableOpacity style={styles.textLinkButton} onPress={() => navigate('tools')} accessibilityRole="button">
-            <Text style={styles.inlineLink}>See all</Text>
-            <ChevronRight size={theme.icon(18)} color={theme.colors.brand} strokeWidth={2.6} />
-          </TouchableOpacity>
-        </View>
-        <View style={styles.tileGrid}>
+        {/* Check something — big icon-first tiles */}
+        <Text style={styles.homeSectionTitle}>Check something</Text>
+        <View style={styles.homeGrid}>
           {homeQuickChecks.map((tool) => (
-            <GridTile key={tool.screen} {...tool} onPress={() => navigate(tool.screen)} />
+            <HomeTile key={tool.screen} {...tool} onPress={() => navigate(tool.screen)} />
           ))}
         </View>
 
-        {recent.length ? (
-          <View style={{ gap: theme.space.sm }}>
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Recent activity</Text>
-              <TouchableOpacity style={styles.textLinkButton} onPress={() => navigate('activity')} accessibilityRole="button">
-                <Text style={styles.inlineLink}>View all</Text>
-                <ChevronRight size={theme.icon(18)} color={theme.colors.brand} strokeWidth={2.6} />
-              </TouchableOpacity>
-            </View>
-            {recent.map((event) => (
-              <ActivityRow key={event.id} event={event} />
-            ))}
-          </View>
+        {/* Today's lesson */}
+        {nextLesson ? (
+          <>
+            <Text style={styles.homeSectionTitle}>Today’s lesson</Text>
+            <TouchableOpacity
+              style={styles.lessonCta}
+              activeOpacity={0.9}
+              disabled={!nextUnlocked}
+              onPress={() => openLesson(nextLesson.id)}
+              accessibilityRole="button"
+            >
+              <View style={styles.lessonCtaIcon}>
+                <GraduationCap size={theme.icon(30)} color={theme.colors.onBrand} strokeWidth={2.3} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.lessonCtaEyebrow}>Week {nextLesson.week} · {nextLesson.minutes} min</Text>
+                <Text style={styles.lessonCtaTitle}>{nextLesson.title}</Text>
+              </View>
+              <ChevronRight size={theme.icon(26)} color={theme.colors.onBrand} strokeWidth={2.5} />
+            </TouchableOpacity>
+          </>
         ) : null}
 
+        {/* Trusted contact */}
         <TrustedContactStrip contacts={contacts} onCall={callContact} onText={textContact} onManage={() => navigate('contacts')} />
       </View>
     );
@@ -831,18 +857,29 @@ function MainApp() {
 
   function renderTools() {
     return (
-      <View style={styles.stack}>
-        <Text style={styles.screenIntro}>Pick the check that matches what just happened.</Text>
-        {toolGroups.map((group) => (
-          <View key={group.title} style={styles.toolSection}>
-            <Text style={styles.toolSectionTitle}>{group.title}</Text>
-            <View style={styles.tileGrid}>
-              {group.items.map((tool) => (
-                <GridTile key={tool.screen} {...tool} onPress={() => navigate(tool.screen)} />
-              ))}
+      <View style={styles.checksStack}>
+        <Text style={styles.screenIntro}>What would you like to check?</Text>
+        {toolGroups.map((group) => {
+          const GroupIcon = group.icon;
+          return (
+            <View key={group.title} style={styles.checkGroup}>
+              <View style={styles.checkGroupHeader}>
+                <View style={styles.checkGroupIcon}>
+                  <GroupIcon size={theme.icon(22)} color={theme.colors.brand} strokeWidth={2.4} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.checkGroupTitle}>{group.title}</Text>
+                  <Text style={styles.checkGroupSubtitle}>{group.subtitle}</Text>
+                </View>
+              </View>
+              <View style={styles.checkGroupBody}>
+                {group.items.map((tool, index) => (
+                  <ToolRow key={tool.screen} {...tool} last={index === group.items.length - 1} onPress={() => navigate(tool.screen)} />
+                ))}
+              </View>
             </View>
-          </View>
-        ))}
+          );
+        })}
       </View>
     );
   }
@@ -1160,27 +1197,40 @@ function MainApp() {
 
   function renderLearn() {
     const modules = modulesForDifficulty(prefs.difficulty);
+    const createdAt = profile?.createdAt ?? new Date().toISOString();
     const done = progress.completedWeeks.filter((id) => modules.some((m) => m.id === id)).length;
     const pct = modules.length ? Math.round((done / modules.length) * 100) : 0;
     return (
-      <View style={styles.stack}>
+      <View style={styles.learnStack}>
         <View style={styles.confidencePanel}>
           <View style={styles.metricTopRow}>
             <Text style={styles.metricLabel}>Your learning journey</Text>
             <Text style={styles.metricSmall}>
-              {done} of {modules.length} weeks
+              {done} of {modules.length} done
             </Text>
           </View>
           <Text style={styles.metricValue}>{pct}%</Text>
           <ProgressBar value={pct === 0 ? 2 : pct} />
         </View>
-        <Text style={styles.screenIntro}>One short lesson each week: read it, see a real example, then try the quick question.</Text>
+        <Text style={styles.screenIntro}>A new lesson opens each week. Tap one to read it and take the quiz.</Text>
         {modules.map((module) => (
-          <WeekCard key={module.id} module={module} />
+          <WeekRow
+            key={module.id}
+            module={module}
+            createdAt={createdAt}
+            completed={progress.completedWeeks.includes(module.id)}
+            onOpen={() => openLesson(module.id)}
+          />
         ))}
         <Btn label="Extra practice quiz" icon={Trophy} variant="secondary" onPress={() => navigate('practice')} />
       </View>
     );
+  }
+
+  function renderLesson() {
+    const module = weeklyModules.find((m) => m.id === activeModuleId);
+    if (!module) return renderLearn();
+    return <LessonScreen module={module} onBack={() => navigate('learn')} />;
   }
 
   function renderPractice() {
@@ -1398,6 +1448,8 @@ function MainApp() {
         return renderNews();
       case 'learn':
         return renderLearn();
+      case 'lesson':
+        return renderLesson();
       case 'practice':
         return renderPractice();
       case 'recovery':
@@ -1444,6 +1496,9 @@ function MainApp() {
           <ScrollView contentContainerStyle={styles.modalContent}>{renderEmergency()}</ScrollView>
         </View>
       </Modal>
+      <Modal visible={!walkthroughSeen} animationType="fade" onRequestClose={markWalkthroughSeen}>
+        <Walkthrough onSkip={markWalkthroughSeen} onDone={startWalkthroughLesson} />
+      </Modal>
     </KeyboardAvoidingView>
   );
 }
@@ -1453,7 +1508,7 @@ function MainApp() {
 // Presentational components (theme-aware)
 // ---------------------------------------------------------------------------
 
-function GridTile({ label, detail, icon: Icon, onPress, tone }: { label: string; detail: string; icon: LucideIcon; onPress: () => void; tone?: RiskLevel }) {
+function HomeTile({ label, detail, icon: Icon, onPress, tone }: { label: string; detail: string; icon: LucideIcon; onPress: () => void; tone?: RiskLevel }) {
   const theme = useTheme();
   const styles = useMemo(() => makeStyles(theme), [theme]);
   const scale = useRef(new Animated.Value(1)).current;
@@ -1463,15 +1518,39 @@ function GridTile({ label, detail, icon: Icon, onPress, tone }: { label: string;
     Animated.spring(scale, { toValue: to, useNativeDriver: true, speed: 40, bounciness: 5 }).start();
   };
   return (
-    <Animated.View style={[styles.tileWrap, { transform: [{ scale }] }]}>
-      <Pressable style={styles.tile} onPress={onPress} onPressIn={() => press(0.96)} onPressOut={() => press(1)} accessibilityRole="button" accessibilityLabel={`${label}. ${detail}`}>
-        <View style={[styles.tileIcon, { backgroundColor: tone ? levelBg(theme, tone) : theme.colors.brandTint }]}>
-          <Icon size={theme.icon(28)} color={color} strokeWidth={2.4} />
+    <Animated.View style={[styles.homeTileWrap, { transform: [{ scale }] }]}>
+      <Pressable style={styles.homeTile} onPress={onPress} onPressIn={() => press(0.96)} onPressOut={() => press(1)} accessibilityRole="button" accessibilityLabel={`${label}. ${detail}`}>
+        <View style={[styles.homeTileIcon, { backgroundColor: tone ? levelBg(theme, tone) : theme.colors.brandTint }]}>
+          <Icon size={theme.icon(32)} color={color} strokeWidth={2.3} />
         </View>
-        <Text style={styles.tileTitle}>{label}</Text>
-        <Text style={styles.tileDetail}>{detail}</Text>
+        <Text style={styles.homeTileTitle}>{label}</Text>
+        <Text style={styles.homeTileDetail}>{detail}</Text>
       </Pressable>
     </Animated.View>
+  );
+}
+
+function ToolRow({ label, detail, icon: Icon, onPress, tone, last }: { label: string; detail: string; icon: LucideIcon; onPress: () => void; tone?: RiskLevel; last?: boolean }) {
+  const theme = useTheme();
+  const styles = useMemo(() => makeStyles(theme), [theme]);
+  const color = tone ? levelColor(theme, tone) : theme.colors.brand;
+  return (
+    <TouchableOpacity
+      style={[styles.toolRow, !last && styles.toolRowDivider]}
+      onPress={onPress}
+      activeOpacity={0.7}
+      accessibilityRole="button"
+      accessibilityLabel={`${label}. ${detail}`}
+    >
+      <View style={[styles.toolRowIcon, { backgroundColor: tone ? levelBg(theme, tone) : theme.colors.brandTint }]}>
+        <Icon size={theme.icon(26)} color={color} strokeWidth={2.4} />
+      </View>
+      <View style={{ flex: 1 }}>
+        <Text style={styles.toolRowTitle}>{label}</Text>
+        <Text style={styles.toolRowDetail}>{detail}</Text>
+      </View>
+      <ChevronRight size={theme.icon(24)} color={theme.colors.faint} strokeWidth={2.4} />
+    </TouchableOpacity>
   );
 }
 
@@ -1781,94 +1860,265 @@ function TrustedContactStrip({
   );
 }
 
-function WeekCard({ module }: { module: WeeklyModule }) {
+function WeekRow({
+  module,
+  createdAt,
+  completed,
+  onOpen,
+}: {
+  module: WeeklyModule;
+  createdAt: string;
+  completed: boolean;
+  onOpen: () => void;
+}) {
+  const theme = useTheme();
+  const styles = useMemo(() => makeStyles(theme), [theme]);
+  const unlocked = isWeekUnlocked(createdAt, module.week);
+  const days = daysUntilUnlock(createdAt, module.week);
+
+  return (
+    <TouchableOpacity
+      style={[styles.weekRow, !unlocked && styles.weekRowLocked]}
+      onPress={onOpen}
+      disabled={!unlocked}
+      activeOpacity={0.8}
+      accessibilityRole="button"
+      accessibilityLabel={`Week ${module.week}. ${module.title}. ${unlocked ? '' : `Unlocks in ${days} days.`}`}
+    >
+      <View
+        style={[
+          styles.weekBadge,
+          completed && { backgroundColor: theme.colors.brand },
+          !unlocked && { backgroundColor: theme.colors.surfaceMuted },
+        ]}
+      >
+        {completed ? (
+          <CheckCircle2 size={theme.icon(24)} color={theme.colors.onBrand} strokeWidth={2.6} />
+        ) : unlocked ? (
+          <Text style={styles.weekBadgeText}>{module.week}</Text>
+        ) : (
+          <Lock size={theme.icon(20)} color={theme.colors.faint} strokeWidth={2.4} />
+        )}
+      </View>
+      <View style={{ flex: 1 }}>
+        <Text style={styles.weekEyebrow}>
+          Week {module.week} · {module.minutes} min{completed ? ' · Done' : ''}
+        </Text>
+        <Text style={[styles.weekTitle, !unlocked && { color: theme.colors.muted }]}>{module.title}</Text>
+        {!unlocked ? <Text style={styles.weekLocked}>Opens in {days} day{days === 1 ? '' : 's'}</Text> : null}
+      </View>
+      {unlocked ? <ChevronRight size={theme.icon(24)} color={theme.colors.faint} strokeWidth={2.4} /> : null}
+    </TouchableOpacity>
+  );
+}
+
+// Full-screen lesson: read the lesson, then a 5-question quiz, then a result.
+function LessonScreen({ module, onBack }: { module: WeeklyModule; onBack: () => void }) {
   const theme = useTheme();
   const styles = useMemo(() => makeStyles(theme), [theme]);
   const { progress, updateProgress } = useApp();
-  const completed = progress.completedWeeks.includes(module.id);
-  const [open, setOpen] = useState(false);
-  const [answer, setAnswer] = useState<number | null>(null);
-  const answered = answer !== null;
+  const [phase, setPhase] = useState<'read' | 'quiz' | 'done'>('read');
+  const [qIndex, setQIndex] = useState(0);
+  const [selected, setSelected] = useState<number | null>(null);
+  const [correct, setCorrect] = useState(0);
+
+  const total = module.quiz.length;
+  const question = module.quiz[qIndex];
+  const answered = selected !== null;
+  const isLast = qIndex === total - 1;
 
   function choose(index: number) {
     if (answered) return;
-    setAnswer(index);
-    if (index === module.quiz.answerIndex && !completed) {
-      updateProgress({
-        ...progress,
-        completedWeeks: [...progress.completedWeeks, module.id],
-        quizScores: { ...progress.quizScores, [module.id]: 100 },
-        currentWeek: Math.max(progress.currentWeek, module.week + 1),
-        lastActivity: new Date().toISOString(),
-      });
-    }
+    setSelected(index);
+    if (index === question.answerIndex) setCorrect((c) => c + 1);
   }
 
-  return (
-    <View style={styles.weekCard}>
-      <TouchableOpacity style={styles.weekTop} onPress={() => setOpen(!open)} activeOpacity={0.8} accessibilityRole="button">
-        <View style={[styles.weekBadge, completed && { backgroundColor: theme.colors.brand }]}>
-          {completed ? <CheckCircle2 size={theme.icon(20)} color={theme.colors.onBrand} strokeWidth={2.6} /> : <Text style={styles.weekBadgeText}>{module.week}</Text>}
-        </View>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.weekEyebrow}>
-            Week {module.week} · {module.minutes} min
-          </Text>
-          <Text style={styles.weekTitle}>{module.title}</Text>
-        </View>
-        <ChevronDown size={theme.icon(22)} color={theme.colors.muted} style={open ? styles.chevronOpen : undefined} />
-      </TouchableOpacity>
+  function next() {
+    if (!isLast) {
+      setQIndex((i) => i + 1);
+      setSelected(null);
+      return;
+    }
+    const score = Math.round((correct / total) * 100);
+    updateProgress({
+      ...progress,
+      completedWeeks: progress.completedWeeks.includes(module.id) ? progress.completedWeeks : [...progress.completedWeeks, module.id],
+      quizScores: { ...progress.quizScores, [module.id]: score },
+      currentWeek: Math.max(progress.currentWeek, module.week + 1),
+      lastActivity: new Date().toISOString(),
+    });
+    setPhase('done');
+  }
 
-      {open ? (
-        <View style={styles.weekBody}>
-          <Text style={styles.cardBody}>{module.lesson}</Text>
+  if (phase === 'read') {
+    return (
+      <View style={styles.lessonStack}>
+        <Text style={styles.lessonEyebrow}>Week {module.week} · {module.minutes} min read</Text>
+        <Text style={styles.lessonTitle}>{module.title}</Text>
+        <Text style={styles.lessonBody}>{module.lesson}</Text>
+
+        <View style={styles.lessonKeyPoints}>
           {module.keyPoints.map((point) => (
-            <View key={point} style={styles.bulletRow}>
-              <CheckCircle2 size={theme.icon(18)} color={theme.colors.brand} />
-              <Text style={styles.bulletText}>{point}</Text>
+            <View key={point} style={styles.lessonBullet}>
+              <CheckCircle2 size={theme.icon(24)} color={theme.colors.brand} strokeWidth={2.4} />
+              <Text style={styles.lessonBulletText}>{point}</Text>
             </View>
           ))}
-          <View style={styles.exampleBox}>
-            <Text style={styles.scriptLabel}>Example · {module.example.channel}</Text>
-            <Text style={styles.scriptText}>{module.example.message}</Text>
-          </View>
-          <Text style={styles.cardBody}>{module.explanation}</Text>
+        </View>
 
-          <Text style={styles.nextTitle}>Quick question</Text>
-          <Text style={styles.quizPrompt}>{module.quiz.prompt}</Text>
-          {module.quiz.options.map((option, index) => {
-            const isCorrect = answered && index === module.quiz.answerIndex;
-            const isWrong = answered && index === answer && index !== module.quiz.answerIndex;
+        <View style={styles.exampleBox}>
+          <View style={styles.exampleHead}>
+            <AlertTriangle size={theme.icon(20)} color={theme.colors.high} strokeWidth={2.4} />
+            <Text style={styles.scriptLabel}>Real example · {module.example.channel}</Text>
+          </View>
+          <Text style={styles.exampleText}>{module.example.message}</Text>
+        </View>
+
+        <Text style={styles.lessonBody}>{module.explanation}</Text>
+
+        <View style={styles.rememberBox}>
+          <ShieldCheck size={theme.icon(24)} color={theme.colors.accent} strokeWidth={2.4} />
+          <Text style={styles.rememberBoxText}>{module.remember}</Text>
+        </View>
+
+        <Btn label={`Start the quiz (${total} questions)`} icon={Trophy} onPress={() => setPhase('quiz')} />
+      </View>
+    );
+  }
+
+  if (phase === 'quiz') {
+    return (
+      <View style={styles.lessonStack}>
+        <View style={styles.quizHeader}>
+          <Text style={styles.quizCounter}>Question {qIndex + 1} of {total}</Text>
+          <ProgressBarTinted value={Math.round(((qIndex + (answered ? 1 : 0)) / total) * 100)} />
+        </View>
+        <Text style={styles.quizPromptBig}>{question.prompt}</Text>
+        <View style={styles.quizOptions}>
+          {question.options.map((option, index) => {
+            const isCorrect = answered && index === question.answerIndex;
+            const isWrong = answered && index === selected && index !== question.answerIndex;
             return (
               <TouchableOpacity
                 key={option}
                 style={[styles.quizOption, isCorrect && styles.quizCorrect, isWrong && styles.quizWrong]}
                 onPress={() => choose(index)}
                 disabled={answered}
-                activeOpacity={0.8}
+                activeOpacity={0.85}
+                accessibilityRole="button"
               >
                 {isCorrect ? (
-                  <CheckCircle2 size={theme.icon(20)} color={theme.colors.low} />
+                  <CheckCircle2 size={theme.icon(24)} color={theme.colors.low} strokeWidth={2.5} />
                 ) : isWrong ? (
-                  <X size={theme.icon(20)} color={theme.colors.danger} />
+                  <X size={theme.icon(24)} color={theme.colors.danger} strokeWidth={2.5} />
                 ) : (
-                  <Circle size={theme.icon(20)} color={theme.colors.muted} />
+                  <Circle size={theme.icon(24)} color={theme.colors.muted} strokeWidth={2.2} />
                 )}
                 <Text style={styles.quizOptionText}>{option}</Text>
               </TouchableOpacity>
             );
           })}
-          {answered ? (
-            <View style={[styles.quizFeedback, { borderColor: answer === module.quiz.answerIndex ? theme.colors.low : theme.colors.high }]}>
-              <Text style={[styles.quizFeedbackTitle, { color: answer === module.quiz.answerIndex ? theme.colors.low : theme.colors.high }]}>
-                {answer === module.quiz.answerIndex ? 'Correct!' : 'Not quite'}
-              </Text>
-              <Text style={styles.cardBody}>{module.quiz.whyCorrect}</Text>
-            </View>
-          ) : null}
-          <Text style={styles.rememberText}>{module.remember}</Text>
         </View>
-      ) : null}
+        {answered ? (
+          <View style={[styles.quizFeedback, { borderColor: selected === question.answerIndex ? theme.colors.low : theme.colors.high }]}>
+            <Text style={[styles.quizFeedbackTitle, { color: selected === question.answerIndex ? theme.colors.low : theme.colors.high }]}>
+              {selected === question.answerIndex ? 'Correct!' : 'Not quite'}
+            </Text>
+            <Text style={styles.cardBody}>{question.whyCorrect}</Text>
+          </View>
+        ) : null}
+        {answered ? <Btn label={isLast ? 'See my results' : 'Next question'} icon={ChevronRight} onPress={next} /> : null}
+      </View>
+    );
+  }
+
+  const score = Math.round((correct / total) * 100);
+  const passed = score >= 60;
+  return (
+    <View style={styles.lessonStack}>
+      <View style={styles.resultBox}>
+        <View style={[styles.resultIcon, { backgroundColor: passed ? theme.colors.lowTint : theme.colors.warnTint }]}>
+          {passed ? (
+            <Trophy size={theme.icon(44)} color={theme.colors.low} strokeWidth={2.2} />
+          ) : (
+            <GraduationCap size={theme.icon(44)} color={theme.colors.warn} strokeWidth={2.2} />
+          )}
+        </View>
+        <Text style={styles.resultScore}>{correct} / {total}</Text>
+        <Text style={styles.resultTitle}>{passed ? 'Well done!' : 'Good effort'}</Text>
+        <Text style={styles.resultText}>
+          {passed ? 'You’ve got the key ideas for this week. This lesson is now complete.' : 'Review the lesson and try again any time — practice builds the habit.'}
+        </Text>
+      </View>
+      <Btn label="Back to lessons" icon={BookOpen} onPress={onBack} />
+      <Btn
+        label="Read the lesson again"
+        variant="secondary"
+        icon={ChevronLeft}
+        onPress={() => {
+          setPhase('read');
+          setQIndex(0);
+          setSelected(null);
+          setCorrect(0);
+        }}
+      />
+    </View>
+  );
+}
+
+// A green-track progress bar used inside lessons.
+function ProgressBarTinted({ value }: { value: number }) {
+  const theme = useTheme();
+  const styles = useMemo(() => makeStyles(theme), [theme]);
+  const width = `${Math.max(4, Math.min(100, value))}%` as DimensionValue;
+  return (
+    <View style={styles.quizTrack}>
+      <View style={[styles.quizFill, { width }]} />
+    </View>
+  );
+}
+
+// First-run feature walkthrough shown once after onboarding.
+function Walkthrough({ onDone, onSkip }: { onDone: () => void; onSkip: () => void }) {
+  const theme = useTheme();
+  const styles = useMemo(() => makeStyles(theme), [theme]);
+  const [index, setIndex] = useState(0);
+  const slides = [
+    { icon: ShieldCheck, title: 'Welcome — you’re in control', body: 'When anything feels off, this app helps you pause and check it calmly. There is never any rush.' },
+    { icon: LayoutGrid, title: 'Check anything', body: 'Tap “Check something” on the home screen to look at a message, call, link, number, or payment.' },
+    { icon: GraduationCap, title: 'Learn a little each week', body: 'A new short lesson opens every week. Read it and take a quick 5-question quiz.' },
+    { icon: Bell, title: 'Get clear alerts', body: 'If a check finds a possible scam, you’ll get a plain warning — and it’s saved under Alerts.' },
+  ];
+  const isLast = index === slides.length - 1;
+  const slide = slides[index];
+  const Icon = slide.icon;
+
+  return (
+    <View style={styles.walkRoot}>
+      <View style={styles.walkTop}>
+        <TouchableOpacity onPress={onSkip} accessibilityRole="button" style={styles.walkSkip}>
+          <Text style={styles.walkSkipText}>Skip</Text>
+        </TouchableOpacity>
+      </View>
+      <View style={styles.walkBody}>
+        <View style={styles.walkIcon}>
+          <Icon size={theme.icon(56)} color={theme.colors.onBrand} strokeWidth={2.2} />
+        </View>
+        <Text style={styles.walkTitle}>{slide.title}</Text>
+        <Text style={styles.walkText}>{slide.body}</Text>
+        <View style={styles.walkDots}>
+          {slides.map((_, i) => (
+            <View key={i} style={[styles.walkDot, i === index && styles.walkDotActive]} />
+          ))}
+        </View>
+      </View>
+      <View style={styles.walkFooter}>
+        <Btn
+          label={isLast ? 'Start my first lesson' : 'Next'}
+          icon={isLast ? GraduationCap : ChevronRight}
+          onPress={() => (isLast ? onDone() : setIndex((i) => i + 1))}
+        />
+      </View>
     </View>
   );
 }
@@ -2124,12 +2374,12 @@ function makeStyles(t: Theme) {
       backgroundColor: t.colors.surface,
       borderTopWidth: 1,
       borderTopColor: t.colors.line,
-      paddingTop: t.space.sm,
-      paddingBottom: Platform.OS === 'ios' ? 28 : t.space.md,
+      paddingTop: t.space.md,
+      paddingBottom: Platform.OS === 'ios' ? 30 : t.space.lg,
       paddingHorizontal: t.space.sm,
     },
-    navItem: { flex: 1, alignItems: 'center', gap: 4 },
-    navIconWrap: { width: t.tap(54), height: t.tap(34), borderRadius: t.radius.pill, alignItems: 'center', justifyContent: 'center' },
+    navItem: { flex: 1, alignItems: 'center', gap: 5 },
+    navIconWrap: { width: t.tap(66), height: t.tap(44), borderRadius: t.radius.pill, alignItems: 'center', justifyContent: 'center' },
     navIconWrapActive: { backgroundColor: t.colors.brandTint },
     navBadge: {
       position: 'absolute',
@@ -2146,8 +2396,95 @@ function makeStyles(t: Theme) {
       borderColor: t.colors.surface,
     },
     navBadgeText: { fontSize: 10, fontWeight: t.weight.bold, color: t.colors.white },
-    navLabel: { fontSize: t.font('tiny'), fontWeight: t.weight.medium, color: t.colors.muted },
+    navLabel: { fontSize: t.font('label'), fontWeight: t.weight.semibold, color: t.colors.muted },
     navLabelActive: { color: t.colors.brand, fontWeight: t.weight.bold },
+
+    // Home ------------------------------------------------------------------
+    homeStack: { gap: t.space.xl },
+    homeSectionTitle: { fontSize: t.font('h2'), fontWeight: t.weight.bold, color: t.colors.ink, letterSpacing: -0.4 },
+    homeGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', rowGap: t.space.md },
+    homeTileWrap: { width: '48%' },
+    homeTile: {
+      width: '100%',
+      backgroundColor: t.colors.surface,
+      borderRadius: t.radius.lg,
+      borderWidth: 1,
+      borderColor: t.colors.line,
+      paddingVertical: t.space.lg,
+      paddingHorizontal: t.space.md,
+      alignItems: 'center',
+      gap: 6,
+      ...t.shadow('soft'),
+    },
+    homeTileIcon: { width: t.tap(66), height: t.tap(66), borderRadius: t.radius.pill, alignItems: 'center', justifyContent: 'center', marginBottom: 2 },
+    homeTileTitle: { fontSize: t.font('body'), fontWeight: t.weight.bold, color: t.colors.ink, textAlign: 'center' },
+    homeTileDetail: { fontSize: t.font('label'), color: t.colors.muted, fontWeight: t.weight.medium, textAlign: 'center' },
+    lessonCta: { flexDirection: 'row', alignItems: 'center', gap: t.space.md, backgroundColor: t.colors.brand, borderRadius: t.radius.lg, padding: t.space.lg, ...t.shadow('card') },
+    lessonCtaIcon: { width: t.tap(54), height: t.tap(54), borderRadius: t.radius.md, backgroundColor: 'rgba(255,255,255,0.18)', alignItems: 'center', justifyContent: 'center' },
+    lessonCtaEyebrow: { fontSize: t.font('label'), fontWeight: t.weight.semibold, color: 'rgba(255,255,255,0.85)' },
+    lessonCtaTitle: { fontSize: t.font('h3'), fontWeight: t.weight.bold, color: t.colors.onBrand, letterSpacing: -0.2, marginTop: 1 },
+
+    // Checks ----------------------------------------------------------------
+    checksStack: { gap: t.space.xxl },
+    checkGroup: { gap: t.space.md },
+    checkGroupHeader: { flexDirection: 'row', alignItems: 'center', gap: t.space.md },
+    checkGroupIcon: { width: t.tap(46), height: t.tap(46), borderRadius: t.radius.sm, backgroundColor: t.colors.brandTint, alignItems: 'center', justifyContent: 'center' },
+    checkGroupTitle: { fontSize: t.font('h2'), fontWeight: t.weight.bold, color: t.colors.ink, letterSpacing: -0.4 },
+    checkGroupSubtitle: { fontSize: t.font('label'), color: t.colors.muted, fontWeight: t.weight.medium, marginTop: 1 },
+    checkGroupBody: { backgroundColor: t.colors.surface, borderRadius: t.radius.lg, borderWidth: 1, borderColor: t.colors.line, overflow: 'hidden', ...t.shadow('soft') },
+    toolRow: { flexDirection: 'row', alignItems: 'center', gap: t.space.md, paddingVertical: t.space.md, paddingHorizontal: t.space.lg, minHeight: t.tap(74) },
+    toolRowDivider: { borderBottomWidth: 1, borderBottomColor: t.colors.line },
+    toolRowIcon: { width: t.tap(50), height: t.tap(50), borderRadius: t.radius.sm, alignItems: 'center', justifyContent: 'center' },
+    toolRowTitle: { fontSize: t.font('body'), fontWeight: t.weight.semibold, color: t.colors.ink },
+    toolRowDetail: { fontSize: t.font('label'), color: t.colors.muted, fontWeight: t.weight.medium, marginTop: 1 },
+
+    // Learn list ------------------------------------------------------------
+    learnStack: { gap: t.space.lg },
+    weekRow: { flexDirection: 'row', alignItems: 'center', gap: t.space.md, backgroundColor: t.colors.surface, borderRadius: t.radius.lg, borderWidth: 1, borderColor: t.colors.line, padding: t.space.lg, minHeight: t.tap(78), ...t.shadow('soft') },
+    weekRowLocked: { backgroundColor: t.colors.surfaceMuted },
+    weekLocked: { fontSize: t.font('label'), color: t.colors.muted, fontWeight: t.weight.semibold, marginTop: 3 },
+
+    // Full-screen lesson ----------------------------------------------------
+    lessonStack: { gap: t.space.xl, paddingBottom: t.space.lg },
+    lessonEyebrow: { fontSize: t.font('label'), fontWeight: t.weight.bold, color: t.colors.brand, textTransform: 'uppercase', letterSpacing: 0.6 },
+    lessonTitle: { fontSize: t.font('h1'), fontWeight: t.weight.bold, color: t.colors.ink, letterSpacing: -0.5, lineHeight: t.lineHeight('h1') },
+    lessonBody: { fontSize: t.font('body'), lineHeight: t.lineHeight('body'), color: t.colors.inkSoft, fontWeight: t.weight.regular },
+    lessonKeyPoints: { gap: t.space.md, backgroundColor: t.colors.surface, borderRadius: t.radius.lg, borderWidth: 1, borderColor: t.colors.line, padding: t.space.lg, ...t.shadow('soft') },
+    lessonBullet: { flexDirection: 'row', alignItems: 'flex-start', gap: t.space.md },
+    lessonBulletText: { flex: 1, fontSize: t.font('bodySm'), lineHeight: t.lineHeight('bodySm'), color: t.colors.ink, fontWeight: t.weight.medium },
+    exampleHead: { flexDirection: 'row', alignItems: 'center', gap: t.space.sm },
+    exampleText: { fontSize: t.font('body'), lineHeight: t.lineHeight('body'), color: t.colors.ink, fontWeight: t.weight.medium, fontStyle: 'italic' },
+    rememberBox: { flexDirection: 'row', alignItems: 'center', gap: t.space.md, backgroundColor: t.colors.accentTint, borderRadius: t.radius.md, padding: t.space.lg },
+    rememberBoxText: { flex: 1, fontSize: t.font('bodySm'), lineHeight: t.lineHeight('bodySm'), color: t.colors.accent, fontWeight: t.weight.bold },
+
+    // Full-screen quiz ------------------------------------------------------
+    quizHeader: { gap: t.space.sm },
+    quizCounter: { fontSize: t.font('label'), fontWeight: t.weight.bold, color: t.colors.brand, textTransform: 'uppercase', letterSpacing: 0.6 },
+    quizPromptBig: { fontSize: t.font('h2'), fontWeight: t.weight.bold, color: t.colors.ink, lineHeight: t.lineHeight('h2'), letterSpacing: -0.3 },
+    quizOptions: { gap: t.space.md },
+    quizTrack: { height: 12, borderRadius: t.radius.pill, backgroundColor: t.colors.surfaceMuted, overflow: 'hidden' },
+    quizFill: { height: '100%', borderRadius: t.radius.pill, backgroundColor: t.colors.brand },
+
+    // Lesson result ---------------------------------------------------------
+    resultBox: { alignItems: 'center', gap: t.space.sm, backgroundColor: t.colors.surface, borderRadius: t.radius.lg, borderWidth: 1, borderColor: t.colors.line, padding: t.space.xxl, ...t.shadow('soft') },
+    resultIcon: { width: t.tap(90), height: t.tap(90), borderRadius: t.radius.pill, alignItems: 'center', justifyContent: 'center', marginBottom: t.space.xs },
+    resultScore: { fontSize: Math.round(t.font('display') * 1.15), fontWeight: t.weight.bold, color: t.colors.ink, letterSpacing: -1 },
+    resultTitle: { fontSize: t.font('h2'), fontWeight: t.weight.bold, color: t.colors.ink },
+    resultText: { fontSize: t.font('body'), lineHeight: t.lineHeight('body'), color: t.colors.inkSoft, textAlign: 'center', fontWeight: t.weight.regular },
+
+    // Walkthrough -----------------------------------------------------------
+    walkRoot: { flex: 1, backgroundColor: t.colors.bg },
+    walkTop: { flexDirection: 'row', justifyContent: 'flex-end', paddingTop: 54, paddingHorizontal: t.space.xl },
+    walkSkip: { padding: t.space.sm },
+    walkSkipText: { fontSize: t.font('bodySm'), fontWeight: t.weight.semibold, color: t.colors.muted },
+    walkBody: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: t.space.xl, gap: t.space.lg },
+    walkIcon: { width: t.tap(108), height: t.tap(108), borderRadius: t.radius.pill, backgroundColor: t.colors.brand, alignItems: 'center', justifyContent: 'center', ...t.shadow('card') },
+    walkTitle: { fontSize: t.font('h1'), fontWeight: t.weight.bold, color: t.colors.ink, textAlign: 'center', letterSpacing: -0.5 },
+    walkText: { fontSize: t.font('body'), lineHeight: t.lineHeight('body'), color: t.colors.inkSoft, textAlign: 'center', fontWeight: t.weight.regular },
+    walkDots: { flexDirection: 'row', gap: 8, marginTop: t.space.sm },
+    walkDot: { width: 9, height: 9, borderRadius: 5, backgroundColor: t.colors.lineStrong },
+    walkDotActive: { width: 24, backgroundColor: t.colors.brand },
+    walkFooter: { padding: t.space.xl, paddingBottom: 34 },
 
     modalScreen: { flex: 1, backgroundColor: t.colors.bg },
     modalHeader: {

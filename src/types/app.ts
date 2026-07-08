@@ -169,6 +169,13 @@ export interface CallRiskResult {
   uncertain: boolean;
 }
 
+export interface QuizQuestion {
+  prompt: string;
+  options: string[];
+  answerIndex: number;
+  whyCorrect: string;
+}
+
 export interface WeeklyModule {
   id: string;
   week: number;
@@ -182,11 +189,6 @@ export interface WeeklyModule {
     message: string;
   };
   explanation: string;
-  quiz: {
-    prompt: string;
-    options: string[];
-    answerIndex: number;
-    whyCorrect: string;
-  };
+  quiz: QuizQuestion[];
   remember: string;
 }

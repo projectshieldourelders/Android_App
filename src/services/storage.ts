@@ -61,6 +61,7 @@ const ONBOARDING_KEY = 'shield.onboarding.v1';
 const PROGRESS_KEY = 'shield.progress.v1';
 const DETECTIONS_KEY = 'shield.detections.v1';
 const SURVEY_KEY = 'shield.survey.v1';
+const WALKTHROUGH_KEY = 'shield.walkthrough.v1';
 
 export const defaultPreferences: Preferences = {
   theme: 'system',
@@ -161,6 +162,14 @@ export async function addDetection(event: DetectionEvent): Promise<DetectionEven
   return next;
 }
 
+export async function loadWalkthroughSeen(): Promise<boolean> {
+  return (await AsyncStorage.getItem(WALKTHROUGH_KEY)) === 'true';
+}
+
+export async function saveWalkthroughSeen(seen: boolean) {
+  await AsyncStorage.setItem(WALKTHROUGH_KEY, seen ? 'true' : 'false');
+}
+
 export async function clearAllData() {
   await AsyncStorage.multiRemove([
     CONTACTS_KEY,
@@ -172,5 +181,6 @@ export async function clearAllData() {
     PROGRESS_KEY,
     DETECTIONS_KEY,
     SURVEY_KEY,
+    WALKTHROUGH_KEY,
   ]);
 }
