@@ -60,6 +60,12 @@ export type TrustedContact = {
   phone: string;
 };
 
+export type AccessibilitySettings = {
+  largeText: boolean;
+  highContrast: boolean;
+  reduceMotion: boolean;
+};
+
 export type ConfidenceEntry = {
   id: string;
   date: string;
