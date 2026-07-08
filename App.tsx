@@ -16,9 +16,9 @@ import {
   FileAudio,
   GraduationCap,
   Home,
+  LayoutGrid,
   LifeBuoy,
   Link as LinkIcon,
-  Mail,
   MessageCircle,
   Mic,
   Newspaper,
@@ -26,7 +26,6 @@ import {
   PhoneCall,
   QrCode,
   Search,
-  Shield,
   ShieldAlert,
   ShieldCheck,
   Siren,
@@ -86,6 +85,7 @@ import {
   saveFamilyPhrase,
 } from './src/services/storage';
 import { AiScamReview, AnalysisResult, ConfidenceEntry, HfSpamReview, RiskLevel, ScamAlert, TrustedContact } from './src/types/app';
+import { colors, font, radius, shadow, space, weight } from './src/theme';
 
 LogBox.ignoreLogs(['Cannot connect to Expo CLI']);
 
@@ -160,55 +160,6 @@ const screenTitles: Record<Screen, string> = {
 
 type ToolAction = { screen: Screen; label: string; detail: string; icon: LucideIcon; tone?: RiskLevel };
 
-type LiveNotice = {
-  id: string;
-  title: string;
-  body: string;
-  label: string;
-  screen: Screen;
-  icon: LucideIcon;
-  level: RiskLevel;
-};
-
-const liveNotices: LiveNotice[] = [
-  {
-    id: 'incoming-call',
-    title: 'Incoming call',
-    body: 'Unknown number. Ask: did they request money, secrecy, a code, or remote access?',
-    label: 'Check call',
-    screen: 'call',
-    icon: PhoneCall,
-    level: 'caution',
-  },
-  {
-    id: 'new-message',
-    title: 'New message',
-    body: 'Prize, payment, and account messages should be checked before replying.',
-    label: 'Check message',
-    screen: 'scam',
-    icon: MessageCircle,
-    level: 'caution',
-  },
-  {
-    id: 'unknown-email',
-    title: 'Unknown email',
-    body: 'Sender is unfamiliar. Check links, attachments, and requests before opening.',
-    label: 'Check email',
-    screen: 'scam',
-    icon: Mail,
-    level: 'high',
-  },
-  {
-    id: 'likely-spam',
-    title: 'Likely spam alert',
-    body: 'Pressure, payment, or private information requests need a trusted second look.',
-    label: 'Safety steps',
-    screen: 'emergency',
-    icon: ShieldAlert,
-    level: 'stop',
-  },
-];
-
 const toolGroups: Array<{ title: string; items: ToolAction[] }> = [
   {
     title: 'Before you reply',
@@ -243,34 +194,29 @@ const toolGroups: Array<{ title: string; items: ToolAction[] }> = [
   },
 ];
 
-const homePrimaryActions: ToolAction[] = [
-  { screen: 'scam', label: 'Message or email', detail: 'Paste the words.', icon: ShieldCheck },
-  { screen: 'call', label: 'Phone call', detail: 'Answer yes or no.', icon: PhoneCall },
-  { screen: 'contacts', label: 'Trusted person', detail: 'Call or text them.', icon: Users },
+const homeQuickChecks: ToolAction[] = [
+  { screen: 'scam', label: 'Message', detail: 'Paste the words', icon: MessageCircle },
+  { screen: 'call', label: 'Phone call', detail: 'Yes / no check', icon: PhoneCall },
+  { screen: 'link', label: 'Link', detail: 'Before you tap', icon: LinkIcon },
+  { screen: 'payment', label: 'Payment', detail: 'Before you pay', icon: CreditCard },
 ];
 
-const openingSteps: Array<{ title: string; detail?: string }> = [
-  {
-    title: 'Stop',
-  },
-  {
-    title: 'Check',
-  },
-  {
-    title: 'Call someone',
-  },
+const openingSteps: Array<{ title: string; detail: string }> = [
+  { title: 'Stop', detail: 'Take a breath' },
+  { title: 'Check', detail: 'Use a tool' },
+  { title: 'Call', detail: 'Someone you trust' },
 ];
 
 function levelBackground(level: RiskLevel) {
   switch (level) {
     case 'stop':
-      return '#FFF1F0';
+      return colors.dangerTint;
     case 'high':
-      return '#FFF7ED';
+      return colors.highTint;
     case 'caution':
-      return '#FFFBEB';
+      return colors.warnTint;
     default:
-      return '#EFF8F5';
+      return colors.brandTint;
   }
 }
 
@@ -287,10 +233,7 @@ function normalizePhone(phone: string) {
 export default function App() {
   const scrollRef = useRef<ScrollView>(null);
   const screenAnim = useRef(new Animated.Value(1)).current;
-  const noticeAnim = useRef(new Animated.Value(1)).current;
-  const urgentPulse = useRef(new Animated.Value(0)).current;
   const [screen, setScreen] = useState<Screen>('home');
-  const [liveNoticeIndex, setLiveNoticeIndex] = useState(0);
   const [contacts, setContacts] = useState<TrustedContact[]>([]);
   const [confidence, setConfidence] = useState<ConfidenceEntry[]>([]);
   const [familyPhrase, setFamilyPhrase] = useState('');
@@ -364,50 +307,11 @@ export default function App() {
     screenAnim.setValue(0);
     Animated.timing(screenAnim, {
       toValue: 1,
-      duration: 220,
+      duration: 340,
       easing: Easing.out(Easing.cubic),
       useNativeDriver: true,
     }).start();
   }, [screen, screenAnim]);
-
-  useEffect(() => {
-    noticeAnim.setValue(0);
-    Animated.timing(noticeAnim, {
-      toValue: 1,
-      duration: 360,
-      easing: Easing.out(Easing.cubic),
-      useNativeDriver: true,
-    }).start();
-  }, [liveNoticeIndex, noticeAnim]);
-
-  useEffect(() => {
-    const noticeTimer = setInterval(() => {
-      setLiveNoticeIndex((current) => (current + 1) % liveNotices.length);
-    }, 5200);
-    const pulse = Animated.loop(
-      Animated.sequence([
-        Animated.timing(urgentPulse, {
-          toValue: 1,
-          duration: 1100,
-          easing: Easing.inOut(Easing.cubic),
-          useNativeDriver: true,
-        }),
-        Animated.timing(urgentPulse, {
-          toValue: 0,
-          duration: 1100,
-          easing: Easing.inOut(Easing.cubic),
-          useNativeDriver: true,
-        }),
-      ]),
-    );
-
-    pulse.start();
-
-    return () => {
-      clearInterval(noticeTimer);
-      pulse.stop();
-    };
-  }, [urgentPulse]);
 
   const scamResult = useMemo(
     () => analyzeMessage([messageText, voicemailTranscript].filter(Boolean).join('\n'), 'message or transcript'),
@@ -727,21 +631,28 @@ export default function App() {
   }
 
   function renderHeader() {
+    const isHome = screen === 'home';
     return (
       <View style={styles.header}>
-        <View style={styles.brandRow}>
-          <View style={styles.logoMark}>
-            <Shield size={26} color="#FFFFFF" strokeWidth={2.6} />
+        {isHome ? (
+          <View style={styles.brandRow}>
+            <View style={styles.logoMark}>
+              <ShieldCheck size={26} color={colors.white} strokeWidth={2.4} />
+            </View>
+            <View style={styles.brandText}>
+              <Text style={styles.brandName}>Shield Our Elders</Text>
+              <Text style={styles.brandTagline}>Your calm second opinion</Text>
+            </View>
           </View>
-          <View style={styles.brandText}>
-            <Text style={styles.eyebrow}>Shield Our Elders</Text>
+        ) : (
+          <View style={styles.headerNavRow}>
+            <TouchableOpacity style={styles.backButton} onPress={() => navigate('home')} activeOpacity={0.7}>
+              <ChevronRight size={20} color={colors.brand} style={styles.backIcon} strokeWidth={2.6} />
+              <Text style={styles.backText}>Home</Text>
+            </TouchableOpacity>
             <Text style={styles.title}>{screenTitles[screen]}</Text>
           </View>
-        </View>
-        <View style={styles.privacyPill}>
-          <ShieldCheck size={15} color="#0B6E69" />
-          <Text style={styles.privacyText}>Check before replying</Text>
-        </View>
+        )}
       </View>
     );
   }
@@ -749,7 +660,7 @@ export default function App() {
   function renderBottomNav() {
     const items: Array<{ screen: Screen; label: string; icon: LucideIcon }> = [
       { screen: 'home', label: 'Home', icon: Home },
-      { screen: 'tools', label: 'Tools', icon: ShieldAlert },
+      { screen: 'tools', label: 'Tools', icon: LayoutGrid },
       { screen: 'contacts', label: 'Contacts', icon: Users },
       { screen: 'learn', label: 'Learn', icon: BookOpen },
       { screen: 'recovery', label: 'Recover', icon: LifeBuoy },
@@ -761,8 +672,10 @@ export default function App() {
           const Icon = item.icon;
           const active = screen === item.screen;
           return (
-            <TouchableOpacity key={item.screen} style={[styles.navItem, active && styles.navItemActive]} onPress={() => navigate(item.screen)} activeOpacity={0.75}>
-              <Icon size={21} color={active ? '#0B6E69' : '#667085'} strokeWidth={active ? 2.6 : 2.1} />
+            <TouchableOpacity key={item.screen} style={styles.navItem} onPress={() => navigate(item.screen)} activeOpacity={0.8}>
+              <View style={[styles.navIconWrap, active && styles.navIconWrapActive]}>
+                <Icon size={22} color={active ? colors.brand : colors.muted} strokeWidth={active ? 2.5 : 2.1} />
+              </View>
               <Text style={[styles.navLabel, active && styles.navLabelActive]}>{item.label}</Text>
             </TouchableOpacity>
           );
@@ -772,53 +685,60 @@ export default function App() {
   }
 
   function renderHome() {
-    const liveNotice = liveNotices[liveNoticeIndex % liveNotices.length];
-
     return (
       <View style={styles.stack}>
         <View style={styles.homeHero}>
-          <Text style={styles.homeHeroLabel}>Start here</Text>
-          <Text style={styles.homeHeroTitle}>Stop first. Then check.</Text>
-          <Text style={styles.homeHeroText}>Use one clear check before you reply, pay, or click.</Text>
-          <View style={styles.briefStepRow}>
-            {openingSteps.map((step) => (
-              <View key={step.title} style={styles.briefStep}>
-                <CheckCircle2 size={18} color="#0B6E69" strokeWidth={2.7} />
-                <Text style={styles.briefStepText}>{step.title}</Text>
-              </View>
-            ))}
-          </View>
+          <Text style={styles.homeHeroTitle}>Not sure about it?{'\n'}Let's check together.</Text>
+          <Text style={styles.homeHeroText}>Slow down and take one clear step before you reply, pay, or tap a link.</Text>
         </View>
 
-        <LiveNoticeCard notice={liveNotice} progress={noticeAnim} pulse={urgentPulse} onPress={() => navigate(liveNotice.screen)} />
+        <View style={styles.stepFlow}>
+          {openingSteps.map((step, index) => (
+            <React.Fragment key={step.title}>
+              <View style={styles.stepFlowItem}>
+                <View style={styles.stepFlowBadge}>
+                  <Text style={styles.stepFlowBadgeText}>{index + 1}</Text>
+                </View>
+                <Text style={styles.stepFlowTitle}>{step.title}</Text>
+                <Text style={styles.stepFlowDetail}>{step.detail}</Text>
+              </View>
+              {index < openingSteps.length - 1 ? <View style={styles.stepFlowLine} /> : null}
+            </React.Fragment>
+          ))}
+        </View>
 
         <TouchableOpacity
           style={styles.emergencyButton}
-          activeOpacity={0.88}
+          activeOpacity={0.9}
           onPress={() => {
             setEmergencyVisible(true);
             navigate('emergency');
           }}
         >
-          <Siren size={36} color="#FFFFFF" strokeWidth={2.8} />
-          <View style={styles.emergencyTextWrap}>
-            <Text style={styles.emergencyTitle}>I THINK THIS IS A SCAM</Text>
-            <Text style={styles.emergencySub}>Show safety steps</Text>
+          <View style={styles.emergencyIcon}>
+            <Siren size={30} color={colors.white} strokeWidth={2.6} />
           </View>
-          <ChevronRight size={30} color="#FFFFFF" />
+          <View style={styles.emergencyTextWrap}>
+            <Text style={styles.emergencyTitle}>I think this is a scam</Text>
+            <Text style={styles.emergencySub}>Show me the safety steps</Text>
+          </View>
+          <ChevronRight size={26} color={colors.white} strokeWidth={2.4} />
         </TouchableOpacity>
 
         <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>What happened?</Text>
+          <Text style={styles.sectionTitle}>Quick checks</Text>
           <TouchableOpacity style={styles.textLinkButton} onPress={() => navigate('tools')}>
-            <Text style={styles.inlineLink}>More</Text>
+            <Text style={styles.inlineLink}>See all</Text>
+            <ChevronRight size={18} color={colors.brand} strokeWidth={2.6} />
           </TouchableOpacity>
         </View>
-        <View style={styles.homeActionGroup}>
-          {homePrimaryActions.map((tool, index) => (
-            <HomeActionButton key={tool.screen} {...tool} last={index === homePrimaryActions.length - 1} onPress={() => navigate(tool.screen)} />
+        <View style={styles.tileGrid}>
+          {homeQuickChecks.map((tool) => (
+            <GridTile key={tool.screen} {...tool} onPress={() => navigate(tool.screen)} />
           ))}
         </View>
+
+        <TrustedContactStrip contacts={contacts} onCall={callContact} onText={textContact} onManage={() => navigate('contacts')} />
       </View>
     );
   }
@@ -826,13 +746,13 @@ export default function App() {
   function renderTools() {
     return (
       <View style={styles.stack}>
-        <Text style={styles.screenIntro}>Pick one check.</Text>
+        <Text style={styles.screenIntro}>Pick the check that matches what just happened.</Text>
         {toolGroups.map((group) => (
           <View key={group.title} style={styles.toolSection}>
             <Text style={styles.toolSectionTitle}>{group.title}</Text>
-            <View style={styles.toolListGroup}>
-              {group.items.map((tool, index) => (
-                <ToolButton key={tool.screen} {...tool} last={index === group.items.length - 1} onPress={() => navigate(tool.screen)} />
+            <View style={styles.tileGrid}>
+              {group.items.map((tool) => (
+                <GridTile key={tool.screen} {...tool} onPress={() => navigate(tool.screen)} />
               ))}
             </View>
           </View>
@@ -1482,19 +1402,13 @@ export default function App() {
                 {
                   translateY: screenAnim.interpolate({
                     inputRange: [0, 1],
-                    outputRange: [12, 0],
+                    outputRange: [18, 0],
                   }),
                 },
               ],
             },
           ]}
         >
-          {screen !== 'home' ? (
-            <TouchableOpacity style={styles.backButton} onPress={() => navigate('home')}>
-              <ChevronRight size={18} color="#0B6E69" style={styles.backIcon} />
-              <Text style={styles.backText}>Home</Text>
-            </TouchableOpacity>
-          ) : null}
           {renderScreen()}
         </Animated.View>
       </ScrollView>
@@ -1514,118 +1428,38 @@ export default function App() {
   );
 }
 
-function HomeActionButton({
+function GridTile({
   label,
   detail,
   icon: Icon,
   onPress,
   tone,
-  last,
 }: {
   label: string;
   detail: string;
   icon: LucideIcon;
   onPress: () => void;
   tone?: RiskLevel;
-  last?: boolean;
 }) {
-  const color = tone ? getLevelColor(tone) : '#0B6E69';
+  const scale = useRef(new Animated.Value(1)).current;
+  const color = tone ? getLevelColor(tone) : colors.brand;
+  const press = (to: number) =>
+    Animated.spring(scale, { toValue: to, useNativeDriver: true, speed: 40, bounciness: 5 }).start();
   return (
-    <Pressable style={({ pressed }) => [styles.homeActionButton, !last && styles.homeActionDivider, pressed && styles.pressedRow]} onPress={onPress}>
-      <View style={[styles.homeActionIcon, { backgroundColor: tone ? levelBackground(tone) : '#E7F4F1' }]}>
-        <Icon size={30} color={color} strokeWidth={2.6} />
-      </View>
-      <View style={styles.homeActionText}>
-        <Text style={styles.homeActionTitle}>{label}</Text>
-        <Text style={styles.homeActionDetail}>{detail}</Text>
-      </View>
-      <ChevronRight size={30} color={color} strokeWidth={2.7} />
-    </Pressable>
-  );
-}
-
-function ToolButton({
-  label,
-  detail,
-  icon: Icon,
-  onPress,
-  tone,
-  last,
-}: {
-  screen?: Screen;
-  label: string;
-  detail: string;
-  icon: LucideIcon;
-  onPress: () => void;
-  tone?: RiskLevel;
-  last?: boolean;
-}) {
-  const color = tone ? getLevelColor(tone) : '#0B6E69';
-  return (
-    <Pressable style={({ pressed }) => [styles.toolButton, !last && styles.homeActionDivider, pressed && styles.pressedRow]} onPress={onPress}>
-      <View style={[styles.toolIcon, { backgroundColor: tone ? levelBackground(tone) : '#E7F4F1' }]}>
-        <Icon size={28} color={color} strokeWidth={2.45} />
-      </View>
-      <View style={styles.toolText}>
-        <Text style={styles.toolTitle}>{label}</Text>
-        <Text style={styles.toolDetail}>{detail}</Text>
-      </View>
-      <ChevronRight size={26} color={color} strokeWidth={2.6} />
-    </Pressable>
-  );
-}
-
-function LiveNoticeCard({
-  notice,
-  progress,
-  pulse,
-  onPress,
-}: {
-  notice: LiveNotice;
-  progress: Animated.Value;
-  pulse: Animated.Value;
-  onPress: () => void;
-}) {
-  const Icon = notice.icon;
-  const color = getLevelColor(notice.level);
-  const translateY = progress.interpolate({
-    inputRange: [0, 1],
-    outputRange: [-12, 0],
-  });
-  const pulseScale = pulse.interpolate({
-    inputRange: [0, 1],
-    outputRange: [1, notice.level === 'stop' ? 1.07 : 1],
-  });
-
-  return (
-    <Pressable onPress={onPress} style={({ pressed }) => [pressed && styles.liveNoticePressed]}>
-      <Animated.View style={[styles.liveNotice, { opacity: progress, transform: [{ translateY }] }]}>
-        <View style={styles.liveNoticeTop}>
-          <Text style={styles.liveNoticeKicker}>Live protection</Text>
-          <View style={[styles.liveNoticeBadge, { borderColor: color }]}>
-            <Text style={[styles.liveNoticeBadgeText, { color }]}>{notice.label}</Text>
-          </View>
+    <Animated.View style={[styles.tileWrap, { transform: [{ scale }] }]}>
+      <Pressable
+        style={styles.tile}
+        onPress={onPress}
+        onPressIn={() => press(0.96)}
+        onPressOut={() => press(1)}
+      >
+        <View style={[styles.tileIcon, { backgroundColor: tone ? levelBackground(tone) : colors.brandTint }]}>
+          <Icon size={26} color={color} strokeWidth={2.4} />
         </View>
-        <View style={styles.liveNoticeContent}>
-          <Animated.View
-            style={[
-              styles.liveNoticeIcon,
-              {
-                backgroundColor: levelBackground(notice.level),
-                transform: [{ scale: pulseScale }],
-              },
-            ]}
-          >
-            <Icon size={27} color={color} strokeWidth={2.65} />
-          </Animated.View>
-          <View style={styles.liveNoticeText}>
-            <Text style={styles.liveNoticeTitle}>{notice.title}</Text>
-            <Text style={styles.liveNoticeBody}>{notice.body}</Text>
-          </View>
-          <ChevronRight size={25} color={color} strokeWidth={2.6} />
-        </View>
-      </Animated.View>
-    </Pressable>
+        <Text style={styles.tileTitle}>{label}</Text>
+        <Text style={styles.tileDetail}>{detail}</Text>
+      </Pressable>
+    </Animated.View>
   );
 }
 
@@ -1819,34 +1653,43 @@ function TrustedContactStrip({
   contacts,
   onCall,
   onText,
+  onManage,
   urgent,
 }: {
   contacts: TrustedContact[];
   onCall: (contact: TrustedContact) => void;
   onText: (contact: TrustedContact) => void;
+  onManage?: () => void;
   urgent?: boolean;
 }) {
   return (
     <View style={[styles.contactStrip, urgent && styles.contactStripUrgent]}>
       <View style={styles.sectionHeader}>
-        <Text style={styles.sectionTitle}>Trusted Contact</Text>
-        {!contacts.length ? <Text style={styles.smallMuted}>None saved</Text> : null}
+        <Text style={styles.contactStripTitle}>Someone you trust</Text>
+        {onManage ? (
+          <TouchableOpacity style={styles.textLinkButton} onPress={onManage}>
+            <Text style={styles.inlineLink}>{contacts.length ? 'Edit' : 'Add'}</Text>
+            <ChevronRight size={18} color={colors.brand} strokeWidth={2.6} />
+          </TouchableOpacity>
+        ) : !contacts.length ? (
+          <Text style={styles.smallMuted}>None saved</Text>
+        ) : null}
       </View>
       {contacts.length ? (
         contacts.map((contact) => (
           <View key={contact.id} style={styles.contactRow}>
             <View style={styles.contactAvatar}>
-              <Users size={22} color="#0B6E69" />
+              <Users size={22} color={colors.brand} />
             </View>
             <View style={styles.contactInfo}>
               <Text style={styles.contactName}>{contact.name || contact.label}</Text>
               <Text style={styles.smallMuted}>{contact.phone}</Text>
             </View>
             <TouchableOpacity style={styles.iconButton} onPress={() => onCall(contact)}>
-              <Phone size={21} color="#0B6E69" />
+              <Phone size={21} color={colors.brand} />
             </TouchableOpacity>
             <TouchableOpacity style={styles.iconButton} onPress={() => onText(contact)}>
-              <MessageCircle size={21} color="#0B6E69" />
+              <MessageCircle size={21} color={colors.brand} />
             </TouchableOpacity>
           </View>
         ))
@@ -1857,1022 +1700,992 @@ function TrustedContactStrip({
   );
 }
 
+
+
 const styles = StyleSheet.create({
   app: {
     flex: 1,
-    backgroundColor: '#F4F7F5',
+    backgroundColor: colors.bg,
   },
+
+  // Header ------------------------------------------------------------------
   header: {
-    paddingTop: 48,
-    paddingHorizontal: 20,
-    paddingBottom: 12,
-    backgroundColor: '#FEFFFE',
+    paddingTop: Platform.OS === 'ios' ? 58 : 40,
+    paddingBottom: space.md,
+    paddingHorizontal: space.xl,
+    backgroundColor: colors.surface,
     borderBottomWidth: 1,
-    borderBottomColor: '#DDE4DE',
+    borderBottomColor: colors.line,
   },
   brandRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: space.md,
   },
   logoMark: {
-    width: 46,
-    height: 46,
-    borderRadius: 8,
-    backgroundColor: '#0B6E69',
+    width: 48,
+    height: 48,
+    borderRadius: radius.md,
+    backgroundColor: colors.brand,
     alignItems: 'center',
     justifyContent: 'center',
+    ...shadow.soft,
   },
   brandText: {
     flex: 1,
   },
-  eyebrow: {
-    color: '#245B8C',
-    fontSize: 13,
-    fontWeight: '800',
+  brandName: {
+    fontSize: font.h2,
+    fontWeight: weight.bold,
+    color: colors.ink,
+    letterSpacing: -0.4,
   },
-  title: {
-    color: '#17212B',
-    fontSize: 24,
-    fontWeight: '900',
-    lineHeight: 29,
+  brandTagline: {
+    fontSize: font.label,
+    color: colors.muted,
+    fontWeight: weight.medium,
+    marginTop: 1,
   },
-  privacyPill: {
-    marginTop: 10,
-    alignSelf: 'flex-start',
+  headerNavRow: {
+    gap: space.xs,
+  },
+  backButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    backgroundColor: '#EFF8F5',
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#C9E8DF',
+    alignSelf: 'flex-start',
+    paddingVertical: 2,
   },
-  privacyText: {
-    color: '#0B6E69',
-    fontSize: 13,
-    fontWeight: '800',
+  backIcon: {
+    transform: [{ rotate: '180deg' }],
+    marginRight: 2,
   },
+  backText: {
+    fontSize: font.bodySm,
+    fontWeight: weight.semibold,
+    color: colors.brand,
+  },
+  title: {
+    fontSize: font.h1,
+    fontWeight: weight.bold,
+    color: colors.ink,
+    letterSpacing: -0.5,
+  },
+
+  // Scroll body -------------------------------------------------------------
   scroll: {
     flex: 1,
   },
   scrollContent: {
-    padding: 18,
-    paddingBottom: 128,
+    padding: space.xl,
+    paddingBottom: 130,
   },
   screenTransition: {
     flex: 1,
   },
   stack: {
-    gap: 16,
+    gap: space.lg,
   },
-  backButton: {
-    alignSelf: 'flex-start',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingVertical: 8,
-    paddingRight: 12,
-    marginBottom: 8,
-  },
-  backIcon: {
-    transform: [{ rotate: '180deg' }],
-  },
-  backText: {
-    color: '#0B6E69',
-    fontSize: 16,
-    fontWeight: '800',
-  },
+
+  // Home hero ---------------------------------------------------------------
   homeHero: {
-    paddingTop: 2,
-    paddingBottom: 2,
-    gap: 10,
-  },
-  homeHeroLabel: {
-    color: '#0B6E69',
-    fontSize: 13,
-    fontWeight: '900',
-    textTransform: 'uppercase',
+    gap: space.sm,
+    marginTop: space.xs,
   },
   homeHeroTitle: {
-    color: '#17212B',
-    fontSize: 30,
-    lineHeight: 36,
-    fontWeight: '900',
+    fontSize: font.display,
+    lineHeight: 39,
+    fontWeight: weight.bold,
+    color: colors.ink,
+    letterSpacing: -0.7,
   },
   homeHeroText: {
-    color: '#475467',
-    fontSize: 19,
-    lineHeight: 28,
-    fontWeight: '700',
+    fontSize: font.body,
+    lineHeight: 27,
+    color: colors.inkSoft,
+    fontWeight: weight.regular,
   },
-  briefStepRow: {
+
+  // Step flow (Stop / Check / Call) -----------------------------------------
+  stepFlow: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  briefStep: {
-    minHeight: 38,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 10,
-    borderRadius: 8,
-    backgroundColor: '#EFF8F5',
-  },
-  briefStepText: {
-    color: '#17212B',
-    fontSize: 16,
-    fontWeight: '900',
-  },
-  liveNotice: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 8,
+    alignItems: 'flex-start',
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
     borderWidth: 1,
-    borderColor: '#DDE4DE',
-    padding: 14,
-    gap: 10,
-    shadowColor: '#344054',
-    shadowOffset: { width: 0, height: 5 },
-    shadowOpacity: 0.08,
-    shadowRadius: 14,
-    elevation: 2,
+    borderColor: colors.line,
+    paddingVertical: space.lg,
+    paddingHorizontal: space.sm,
+    ...shadow.soft,
   },
-  liveNoticePressed: {
-    transform: [{ scale: 0.995 }],
-  },
-  liveNoticeTop: {
-    minHeight: 30,
-    flexDirection: 'row',
+  stepFlowItem: {
+    flex: 1,
     alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 10,
+    gap: 3,
+    paddingHorizontal: 2,
   },
-  liveNoticeKicker: {
-    color: '#245B8C',
-    fontSize: 13,
-    fontWeight: '900',
-    textTransform: 'uppercase',
-  },
-  liveNoticeBadge: {
-    minHeight: 30,
-    paddingHorizontal: 10,
-    borderRadius: 8,
-    borderWidth: 1,
+  stepFlowBadge: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: colors.brandTint,
+    alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#FFFFFF',
+    marginBottom: 3,
   },
-  liveNoticeBadgeText: {
-    fontSize: 13,
-    fontWeight: '900',
+  stepFlowBadgeText: {
+    fontSize: font.bodySm,
+    fontWeight: weight.bold,
+    color: colors.brand,
   },
-  liveNoticeContent: {
+  stepFlowTitle: {
+    fontSize: font.bodySm,
+    fontWeight: weight.bold,
+    color: colors.ink,
+  },
+  stepFlowDetail: {
+    fontSize: font.tiny,
+    color: colors.muted,
+    textAlign: 'center',
+    fontWeight: weight.medium,
+  },
+  stepFlowLine: {
+    width: 20,
+    height: 2,
+    backgroundColor: colors.lineStrong,
+    marginTop: 18,
+    borderRadius: 1,
+  },
+
+  // Emergency button --------------------------------------------------------
+  emergencyButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: space.md,
+    backgroundColor: colors.danger,
+    borderRadius: radius.lg,
+    padding: space.lg,
+    ...shadow.card,
   },
-  liveNoticeIcon: {
+  emergencyIcon: {
     width: 54,
     height: 54,
-    borderRadius: 8,
+    borderRadius: radius.md,
+    backgroundColor: 'rgba(255, 255, 255, 0.18)',
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  liveNoticeText: {
-    flex: 1,
-  },
-  liveNoticeTitle: {
-    color: '#17212B',
-    fontSize: 20,
-    lineHeight: 25,
-    fontWeight: '900',
-  },
-  liveNoticeBody: {
-    marginTop: 3,
-    color: '#475467',
-    fontSize: 16,
-    lineHeight: 23,
-    fontWeight: '700',
-  },
-  emergencyButton: {
-    minHeight: 108,
-    backgroundColor: '#B3261E',
-    borderRadius: 8,
-    paddingHorizontal: 18,
-    paddingVertical: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 14,
-    shadowColor: '#7A271A',
-    shadowOffset: { width: 0, height: 5 },
-    shadowOpacity: 0.18,
-    shadowRadius: 12,
-    elevation: 3,
   },
   emergencyTextWrap: {
     flex: 1,
   },
   emergencyTitle: {
-    color: '#FFFFFF',
-    fontSize: 25,
-    fontWeight: '900',
-    lineHeight: 31,
+    fontSize: font.h3,
+    fontWeight: weight.bold,
+    color: colors.white,
+    letterSpacing: -0.3,
   },
   emergencySub: {
-    marginTop: 4,
-    color: '#FFE9E7',
-    fontSize: 18,
-    fontWeight: '700',
+    fontSize: font.bodySm,
+    color: 'rgba(255, 255, 255, 0.88)',
+    marginTop: 2,
+    fontWeight: weight.regular,
   },
+
+  // Section header ----------------------------------------------------------
   sectionHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    gap: 12,
   },
   sectionTitle: {
-    color: '#17212B',
-    fontSize: 24,
-    fontWeight: '900',
+    fontSize: font.h3,
+    fontWeight: weight.bold,
+    color: colors.ink,
+    letterSpacing: -0.3,
   },
   textLinkButton: {
-    minHeight: 48,
-    justifyContent: 'center',
-    paddingHorizontal: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 1,
+    paddingVertical: 4,
+    paddingLeft: space.sm,
   },
   inlineLink: {
-    color: '#0B6E69',
-    fontSize: 18,
-    fontWeight: '900',
+    fontSize: font.bodySm,
+    fontWeight: weight.semibold,
+    color: colors.brand,
   },
-  actionList: {
-    gap: 12,
-  },
-  homeActionGroup: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#DDE4DE',
-    overflow: 'hidden',
-    shadowColor: '#344054',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.06,
-    shadowRadius: 10,
-    elevation: 1,
-  },
-  toolListGroup: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#DDE4DE',
-    overflow: 'hidden',
-    shadowColor: '#344054',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.06,
-    shadowRadius: 10,
-    elevation: 1,
-  },
-  toolSection: {
-    gap: 8,
-  },
-  toolSectionTitle: {
-    color: '#344054',
-    fontSize: 17,
-    lineHeight: 23,
-    fontWeight: '900',
-  },
-  homeActionButton: {
-    minHeight: 90,
-    backgroundColor: '#FFFFFF',
-    paddingHorizontal: 15,
-    paddingVertical: 13,
+
+  // Tile grid ---------------------------------------------------------------
+  tileGrid: {
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: 13,
-  },
-  homeActionDivider: {
-    borderBottomWidth: 1,
-    borderBottomColor: '#E4E9E5',
-  },
-  pressedRow: {
-    backgroundColor: '#F1F7F5',
-    transform: [{ scale: 0.995 }],
-  },
-  homeActionIcon: {
-    width: 54,
-    height: 54,
-    borderRadius: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  homeActionText: {
-    flex: 1,
-  },
-  homeActionTitle: {
-    color: '#17212B',
-    fontSize: 21,
-    lineHeight: 27,
-    fontWeight: '900',
-  },
-  homeActionDetail: {
-    marginTop: 4,
-    color: '#475467',
-    fontSize: 16,
-    lineHeight: 22,
-    fontWeight: '700',
-  },
-  toolButton: {
-    minHeight: 92,
-    backgroundColor: '#FFFFFF',
-    paddingHorizontal: 14,
-    paddingVertical: 13,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 13,
-  },
-  toolIcon: {
-    width: 56,
-    height: 56,
-    borderRadius: 8,
-    backgroundColor: '#E7F4F1',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  toolText: {
-    flex: 1,
-  },
-  toolTitle: {
-    color: '#17212B',
-    fontSize: 21,
-    lineHeight: 27,
-    fontWeight: '900',
-  },
-  toolDetail: {
-    marginTop: 3,
-    color: '#667085',
-    fontSize: 16,
-    lineHeight: 22,
-    fontWeight: '700',
-  },
-  metricLabel: {
-    color: '#667085',
-    fontSize: 16,
-    fontWeight: '800',
-  },
-  metricTopRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexWrap: 'wrap',
     justifyContent: 'space-between',
-    gap: 10,
+    rowGap: space.md,
   },
-  metricSmall: {
-    color: '#475467',
-    fontSize: 15,
-    fontWeight: '900',
+  tileWrap: {
+    width: '48%',
   },
-  metricValue: {
-    color: '#17212B',
-    fontSize: 34,
-    fontWeight: '900',
-    lineHeight: 38,
-  },
-  progressTrack: {
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: '#E4E7EC',
-    overflow: 'hidden',
-  },
-  progressFill: {
-    height: '100%',
-    backgroundColor: '#0B6E69',
-  },
-  contactStrip: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 8,
+  tile: {
+    width: '100%',
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
     borderWidth: 1,
-    borderColor: '#E4E7EC',
-    padding: 14,
-    gap: 12,
+    borderColor: colors.line,
+    padding: space.lg,
+    gap: 6,
+    ...shadow.soft,
+  },
+  tileIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: radius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 4,
+  },
+  tileTitle: {
+    fontSize: font.body,
+    fontWeight: weight.bold,
+    color: colors.ink,
+    letterSpacing: -0.2,
+  },
+  tileDetail: {
+    fontSize: font.label,
+    color: colors.muted,
+    fontWeight: weight.medium,
+  },
+
+  // Trusted contact ---------------------------------------------------------
+  contactStrip: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.line,
+    padding: space.lg,
+    gap: space.md,
+    ...shadow.soft,
   },
   contactStripUrgent: {
-    borderColor: '#FDA29B',
-    backgroundColor: '#FFF8F7',
+    borderColor: colors.dangerBorder,
+    backgroundColor: colors.dangerTint,
+  },
+  contactStripTitle: {
+    fontSize: font.h3,
+    fontWeight: weight.bold,
+    color: colors.ink,
+    letterSpacing: -0.3,
   },
   contactRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    minHeight: 68,
+    gap: space.md,
   },
   contactAvatar: {
-    width: 44,
-    height: 44,
-    borderRadius: 8,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: colors.brandTint,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#EFF8F5',
   },
   contactInfo: {
     flex: 1,
   },
   contactName: {
-    color: '#17212B',
-    fontSize: 17,
-    fontWeight: '900',
+    fontSize: font.bodySm,
+    fontWeight: weight.semibold,
+    color: colors.ink,
   },
   iconButton: {
-    width: 54,
-    height: 54,
-    borderRadius: 8,
+    width: 48,
+    height: 48,
+    borderRadius: radius.md,
+    backgroundColor: colors.brandTint,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#E7F4F1',
-    borderWidth: 1,
-    borderColor: '#BFE3DA',
   },
+  smallMuted: {
+    fontSize: font.label,
+    color: colors.muted,
+    fontWeight: weight.regular,
+    lineHeight: 20,
+  },
+
+  // Generic card ------------------------------------------------------------
+  card: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.line,
+    padding: space.lg,
+    gap: space.md,
+    ...shadow.soft,
+  },
+  cardTitle: {
+    fontSize: font.h3,
+    fontWeight: weight.bold,
+    color: colors.ink,
+    letterSpacing: -0.3,
+  },
+  cardBody: {
+    fontSize: font.bodySm,
+    lineHeight: 24,
+    color: colors.inkSoft,
+    fontWeight: weight.regular,
+  },
+
+  // Screen intros -----------------------------------------------------------
   screenIntro: {
-    color: '#344054',
-    fontSize: 19,
-    lineHeight: 29,
-    fontWeight: '700',
+    fontSize: font.body,
+    lineHeight: 26,
+    color: colors.inkSoft,
+    fontWeight: weight.medium,
   },
   screenIntroNarrow: {
     flex: 1,
-    color: '#344054',
-    fontSize: 16,
+    fontSize: font.bodySm,
     lineHeight: 23,
-    fontWeight: '600',
+    color: colors.muted,
+    fontWeight: weight.medium,
+    paddingRight: space.md,
+  },
+
+  // Tools sections ----------------------------------------------------------
+  toolSection: {
+    gap: space.md,
+  },
+  toolSectionTitle: {
+    fontSize: font.h3,
+    fontWeight: weight.bold,
+    color: colors.ink,
+    letterSpacing: -0.3,
+  },
+  toolIcon: {
+    width: 46,
+    height: 46,
+    borderRadius: radius.sm,
+    backgroundColor: colors.brandTint,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  // Inputs ------------------------------------------------------------------
+  input: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.md,
+    borderWidth: 1.5,
+    borderColor: colors.lineStrong,
+    paddingHorizontal: space.lg,
+    paddingVertical: 15,
+    fontSize: font.body,
+    color: colors.ink,
   },
   textArea: {
-    minHeight: 170,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#D0D5DD',
-    backgroundColor: '#FFFFFF',
-    padding: 14,
-    color: '#17212B',
-    fontSize: 19,
-    lineHeight: 28,
-    fontWeight: '600',
+    backgroundColor: colors.surface,
+    borderRadius: radius.md,
+    borderWidth: 1.5,
+    borderColor: colors.lineStrong,
+    padding: space.lg,
+    fontSize: font.body,
+    lineHeight: 26,
+    color: colors.ink,
+    minHeight: 140,
   },
   textAreaSmall: {
-    minHeight: 110,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#D0D5DD',
-    backgroundColor: '#FFFFFF',
-    padding: 14,
-    color: '#17212B',
-    fontSize: 18,
-    lineHeight: 26,
-    fontWeight: '600',
+    backgroundColor: colors.surface,
+    borderRadius: radius.md,
+    borderWidth: 1.5,
+    borderColor: colors.lineStrong,
+    padding: space.lg,
+    fontSize: font.bodySm,
+    lineHeight: 24,
+    color: colors.ink,
+    minHeight: 92,
   },
-  input: {
-    minHeight: 62,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#D0D5DD',
-    backgroundColor: '#FFFFFF',
-    paddingHorizontal: 13,
-    color: '#17212B',
-    fontSize: 19,
-    fontWeight: '700',
+
+  // Buttons -----------------------------------------------------------------
+  primaryButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: space.sm,
+    backgroundColor: colors.brand,
+    borderRadius: radius.md,
+    paddingVertical: 17,
+    paddingHorizontal: space.xl,
+    ...shadow.soft,
+  },
+  primaryButtonText: {
+    fontSize: font.body,
+    fontWeight: weight.bold,
+    color: colors.white,
+    letterSpacing: -0.2,
+  },
+  disabledButton: {
+    backgroundColor: colors.bgWarm,
+    borderColor: colors.line,
+    shadowOpacity: 0,
+    elevation: 0,
+  },
+  disabledText: {
+    color: colors.faint,
   },
   buttonRow: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 10,
-  },
-  secondaryAction: {
-    minHeight: 56,
-    paddingHorizontal: 12,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#BFE3DA',
-    backgroundColor: '#EFF8F5',
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-  },
-  secondaryActionText: {
-    color: '#0B6E69',
-    fontSize: 17,
-    fontWeight: '900',
+    gap: space.sm,
   },
   secondaryButtonWide: {
-    minHeight: 62,
-    paddingHorizontal: 14,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#BFE3DA',
-    backgroundColor: '#EFF8F5',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 8,
+    gap: space.sm,
+    backgroundColor: colors.brandTint,
+    borderRadius: radius.md,
+    paddingVertical: 16,
+    paddingHorizontal: space.lg,
   },
   secondaryButtonWideText: {
-    color: '#0B6E69',
-    fontSize: 18,
-    fontWeight: '900',
+    fontSize: font.bodySm,
+    fontWeight: weight.semibold,
+    color: colors.brand,
   },
-  disabledButton: {
-    opacity: 0.45,
-  },
-  disabledText: {
-    color: '#98A2B3',
-  },
-  primaryButton: {
-    minHeight: 64,
-    borderRadius: 8,
-    paddingHorizontal: 14,
-    backgroundColor: '#0B6E69',
+  secondaryAction: {
+    flex: 1,
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    flexDirection: 'row',
-    gap: 9,
-  },
-  primaryButtonText: {
-    color: '#FFFFFF',
-    fontSize: 19,
-    fontWeight: '900',
-  },
-  attachment: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 8,
+    gap: 6,
+    backgroundColor: colors.surface,
     borderWidth: 1,
-    borderColor: '#E4E7EC',
-    padding: 10,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
+    borderColor: colors.line,
+    borderRadius: radius.pill,
+    paddingVertical: 12,
+    paddingHorizontal: space.md,
   },
-  attachmentImage: {
-    width: 58,
-    height: 58,
-    borderRadius: 8,
-    backgroundColor: '#F2F4F7',
+  secondaryActionText: {
+    fontSize: font.label,
+    fontWeight: weight.semibold,
+    color: colors.brand,
   },
-  attachmentText: {
-    flex: 1,
-  },
-  attachmentTitle: {
-    color: '#17212B',
-    fontSize: 16,
-    fontWeight: '900',
-  },
-  smallMuted: {
-    color: '#667085',
-    fontSize: 14,
-    lineHeight: 19,
-    fontWeight: '600',
-  },
+
+  // Risk / AI panels --------------------------------------------------------
   riskPanel: {
-    borderRadius: 8,
-    borderWidth: 1.5,
-    padding: 15,
-    gap: 12,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    padding: space.lg,
+    gap: space.md,
+    ...shadow.soft,
   },
   aiPanel: {
-    borderRadius: 8,
-    borderWidth: 1.5,
-    padding: 15,
-    gap: 12,
-  },
-  aiActionBox: {
-    gap: 8,
-  },
-  errorText: {
-    color: '#B42318',
-    fontSize: 16,
-    lineHeight: 23,
-    fontWeight: '800',
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    padding: space.lg,
+    gap: space.md,
+    ...shadow.soft,
   },
   riskTop: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    gap: 12,
+    alignItems: 'center',
+    gap: space.md,
   },
   riskTextColumn: {
     flex: 1,
+    gap: 3,
   },
   riskLabel: {
-    fontSize: 15,
-    fontWeight: '900',
+    fontSize: font.tiny,
+    fontWeight: weight.bold,
+    letterSpacing: 1.1,
     textTransform: 'uppercase',
   },
   riskHeadline: {
-    marginTop: 3,
-    color: '#17212B',
-    fontSize: 22,
-    lineHeight: 28,
-    fontWeight: '900',
-    maxWidth: 260,
+    fontSize: font.h3,
+    fontWeight: weight.bold,
+    color: colors.ink,
+    letterSpacing: -0.3,
   },
   scoreBadge: {
-    width: 58,
-    height: 58,
-    borderRadius: 8,
+    minWidth: 56,
+    height: 56,
+    borderRadius: radius.md,
     borderWidth: 2,
+    backgroundColor: colors.surface,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 8,
   },
   scoreText: {
-    fontSize: 24,
-    fontWeight: '900',
-  },
-  card: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#E4E7EC',
-    padding: 14,
-    gap: 12,
-  },
-  cardTitle: {
-    color: '#17212B',
-    fontSize: 21,
-    lineHeight: 27,
-    fontWeight: '900',
-  },
-  cardBody: {
-    color: '#344054',
-    fontSize: 18,
-    lineHeight: 27,
-    fontWeight: '700',
+    fontSize: font.h2,
+    fontWeight: weight.bold,
   },
   findings: {
-    gap: 10,
+    gap: space.sm,
   },
   findingRow: {
     flexDirection: 'row',
-    gap: 9,
     alignItems: 'flex-start',
-    backgroundColor: '#FFFFFF',
-    borderRadius: 8,
-    padding: 10,
+    gap: space.sm,
   },
   findingText: {
     flex: 1,
+    gap: 1,
   },
   findingTitle: {
-    color: '#17212B',
-    fontSize: 18,
-    fontWeight: '900',
+    fontSize: font.bodySm,
+    fontWeight: weight.semibold,
+    color: colors.ink,
   },
   findingDetail: {
-    marginTop: 3,
-    color: '#475467',
-    fontSize: 17,
-    lineHeight: 25,
-    fontWeight: '700',
-  },
-  scriptBox: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 8,
-    padding: 12,
-    borderWidth: 1,
-    borderColor: '#E4E7EC',
-  },
-  scriptLabel: {
-    color: '#245B8C',
-    fontSize: 13,
-    fontWeight: '900',
-    textTransform: 'uppercase',
-  },
-  scriptText: {
-    marginTop: 5,
-    color: '#17212B',
-    fontSize: 19,
-    lineHeight: 27,
-    fontWeight: '800',
+    fontSize: font.label,
+    lineHeight: 21,
+    color: colors.inkSoft,
   },
   nextTitle: {
-    color: '#17212B',
-    fontSize: 18,
-    fontWeight: '900',
+    fontSize: font.label,
+    fontWeight: weight.bold,
+    color: colors.ink,
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+    marginTop: 2,
   },
   bulletRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    gap: 8,
+    gap: space.sm,
   },
   bulletText: {
     flex: 1,
-    color: '#344054',
-    fontSize: 18,
-    lineHeight: 27,
-    fontWeight: '700',
+    fontSize: font.bodySm,
+    lineHeight: 24,
+    color: colors.inkSoft,
   },
-  toggleRow: {
-    minHeight: 78,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 8,
+
+  // Script / extracted text -------------------------------------------------
+  scriptBox: {
+    backgroundColor: colors.surfaceMuted,
+    borderRadius: radius.md,
     borderWidth: 1,
-    borderColor: '#E4E7EC',
-    paddingHorizontal: 14,
-    paddingVertical: 10,
+    borderColor: colors.line,
+    padding: space.md,
+    gap: 4,
+  },
+  scriptLabel: {
+    fontSize: font.tiny,
+    fontWeight: weight.bold,
+    color: colors.muted,
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+  },
+  scriptText: {
+    fontSize: font.bodySm,
+    lineHeight: 24,
+    color: colors.ink,
+    fontWeight: weight.medium,
+  },
+
+  // AI helper boxes ---------------------------------------------------------
+  aiActionBox: {
+    gap: space.sm,
+  },
+  errorText: {
+    fontSize: font.label,
+    color: colors.danger,
+    fontWeight: weight.medium,
+    lineHeight: 20,
+  },
+
+  // Attachments -------------------------------------------------------------
+  attachment: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.md,
+    backgroundColor: colors.surface,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.line,
+    padding: space.md,
+  },
+  attachmentImage: {
+    width: 54,
+    height: 54,
+    borderRadius: radius.sm,
+    backgroundColor: colors.bgWarm,
+  },
+  attachmentText: {
+    flex: 1,
+    gap: 1,
+  },
+  attachmentTitle: {
+    fontSize: font.bodySm,
+    fontWeight: weight.semibold,
+    color: colors.ink,
+  },
+
+  // Toggle rows -------------------------------------------------------------
+  toggleRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    gap: 14,
+    gap: space.md,
+    backgroundColor: colors.surface,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.line,
+    paddingVertical: 14,
+    paddingHorizontal: space.lg,
   },
   toggleLabel: {
     flex: 1,
-    color: '#17212B',
-    fontSize: 19,
-    lineHeight: 27,
-    fontWeight: '800',
+    fontSize: font.bodySm,
+    fontWeight: weight.medium,
+    color: colors.ink,
+    lineHeight: 22,
   },
+
+  // Emergency modal + stop panel --------------------------------------------
   stopPanel: {
-    backgroundColor: '#FFF1F0',
-    borderColor: '#FDA29B',
+    alignItems: 'center',
+    gap: space.sm,
+    backgroundColor: colors.dangerTint,
+    borderRadius: radius.lg,
     borderWidth: 1,
-    borderRadius: 8,
-    padding: 16,
-    gap: 9,
+    borderColor: colors.dangerBorder,
+    padding: space.xl,
   },
   stopTitle: {
-    color: '#B42318',
-    fontSize: 28,
-    lineHeight: 34,
-    fontWeight: '900',
+    fontSize: font.h1,
+    fontWeight: weight.bold,
+    color: colors.danger,
+    letterSpacing: -0.4,
+    textAlign: 'center',
   },
   stopText: {
-    color: '#344054',
-    fontSize: 17,
-    lineHeight: 24,
-    fontWeight: '700',
+    fontSize: font.body,
+    lineHeight: 26,
+    color: colors.inkSoft,
+    textAlign: 'center',
+    fontWeight: weight.medium,
   },
   stepRow: {
-    minHeight: 62,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#E4E7EC',
-    padding: 12,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: space.md,
+    backgroundColor: colors.surface,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.line,
+    padding: space.md,
+    ...shadow.soft,
   },
   stepNumber: {
     width: 38,
     height: 38,
-    borderRadius: 8,
+    borderRadius: 19,
+    backgroundColor: colors.brand,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#B42318',
   },
   stepNumberText: {
-    color: '#FFFFFF',
-    fontSize: 18,
-    fontWeight: '900',
+    fontSize: font.bodySm,
+    fontWeight: weight.bold,
+    color: colors.white,
   },
   stepText: {
     flex: 1,
-    color: '#17212B',
-    fontSize: 19,
-    lineHeight: 25,
-    fontWeight: '900',
+    fontSize: font.bodySm,
+    lineHeight: 24,
+    color: colors.ink,
+    fontWeight: weight.medium,
   },
-  cameraFrame: {
-    height: 330,
-    overflow: 'hidden',
-    borderRadius: 8,
-    borderWidth: 2,
-    borderColor: '#0B6E69',
-    backgroundColor: '#17212B',
-  },
-  cameraView: {
-    flex: 1,
-  },
-  cameraHint: {
-    position: 'absolute',
-    left: 12,
-    right: 12,
-    bottom: 12,
-    minHeight: 42,
-    borderRadius: 8,
-    textAlign: 'center',
-    textAlignVertical: 'center',
-    backgroundColor: 'rgba(23,33,43,0.82)',
-    color: '#FFFFFF',
-    fontSize: 17,
-    fontWeight: '900',
-    paddingVertical: 10,
-  },
+
+  // News --------------------------------------------------------------------
   refreshButton: {
-    minHeight: 44,
-    paddingHorizontal: 12,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#BFE3DA',
-    backgroundColor: '#EFF8F5',
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
+    backgroundColor: colors.brandTint,
+    borderRadius: radius.pill,
+    paddingVertical: 8,
+    paddingHorizontal: space.md,
   },
   refreshText: {
-    color: '#0B6E69',
-    fontSize: 15,
-    fontWeight: '900',
+    fontSize: font.label,
+    fontWeight: weight.semibold,
+    color: colors.brand,
   },
   newsItem: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 8,
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
     borderWidth: 1,
-    borderColor: '#E4E7EC',
-    padding: 14,
-    gap: 8,
+    borderColor: colors.line,
+    padding: space.lg,
+    gap: 6,
+    ...shadow.soft,
   },
   newsTop: {
     flexDirection: 'row',
+    alignItems: 'center',
     justifyContent: 'space-between',
-    gap: 10,
   },
   newsSource: {
-    color: '#245B8C',
-    fontSize: 13,
-    fontWeight: '900',
+    fontSize: font.tiny,
+    fontWeight: weight.bold,
+    color: colors.brand,
     textTransform: 'uppercase',
+    letterSpacing: 0.8,
   },
   newsDate: {
-    color: '#667085',
-    fontSize: 13,
-    fontWeight: '800',
+    fontSize: font.tiny,
+    color: colors.faint,
+    fontWeight: weight.medium,
   },
   newsTitle: {
-    color: '#17212B',
-    fontSize: 19,
+    fontSize: font.h3,
+    fontWeight: weight.bold,
+    color: colors.ink,
     lineHeight: 25,
-    fontWeight: '900',
+    letterSpacing: -0.3,
   },
+
+  // Learn -------------------------------------------------------------------
   lessonItem: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 8,
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
     borderWidth: 1,
-    borderColor: '#E4E7EC',
-    padding: 14,
-    gap: 10,
+    borderColor: colors.line,
+    padding: space.lg,
+    gap: space.sm,
+    ...shadow.soft,
   },
   lessonHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    gap: 12,
+    gap: space.md,
   },
   lessonTitle: {
-    color: '#17212B',
-    fontSize: 20,
-    fontWeight: '900',
+    fontSize: font.h3,
+    fontWeight: weight.bold,
+    color: colors.ink,
+    letterSpacing: -0.3,
   },
   lessonBody: {
-    gap: 9,
+    gap: space.sm,
+    marginTop: space.xs,
+    paddingTop: space.md,
+    borderTopWidth: 1,
+    borderTopColor: colors.line,
   },
   rememberText: {
-    color: '#245B8C',
-    fontSize: 16,
-    lineHeight: 23,
-    fontWeight: '900',
+    fontSize: font.bodySm,
+    lineHeight: 24,
+    color: colors.accent,
+    fontWeight: weight.semibold,
+    backgroundColor: colors.accentTint,
+    borderRadius: radius.sm,
+    padding: space.md,
+    marginTop: space.xs,
   },
+
+  // Practice / quiz ---------------------------------------------------------
   confidencePanel: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#E4E7EC',
-    padding: 14,
-    gap: 9,
+    backgroundColor: colors.brand,
+    borderRadius: radius.lg,
+    padding: space.lg,
+    gap: space.sm,
+    ...shadow.card,
   },
-  practiceCard: {
-    backgroundColor: '#183A4A',
-    borderRadius: 8,
-    padding: 18,
-    gap: 10,
-  },
-  practiceText: {
-    color: '#FFFFFF',
-    fontSize: 23,
-    lineHeight: 31,
-    fontWeight: '900',
-  },
-  optionGrid: {
-    gap: 10,
-  },
-  answerButton: {
-    minHeight: 58,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#E4E7EC',
-    paddingHorizontal: 14,
+  metricTopRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    justifyContent: 'space-between',
+  },
+  metricLabel: {
+    fontSize: font.label,
+    fontWeight: weight.semibold,
+    color: 'rgba(255, 255, 255, 0.92)',
+  },
+  metricSmall: {
+    fontSize: font.label,
+    color: 'rgba(255, 255, 255, 0.78)',
+    fontWeight: weight.medium,
+  },
+  metricValue: {
+    fontSize: 40,
+    fontWeight: weight.bold,
+    color: colors.white,
+    letterSpacing: -1,
+  },
+  practiceCard: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.line,
+    padding: space.lg,
+    gap: space.sm,
+    ...shadow.soft,
+  },
+  practiceText: {
+    fontSize: font.body,
+    lineHeight: 27,
+    color: colors.ink,
+    fontWeight: weight.medium,
+  },
+  optionGrid: {
+    flexDirection: 'row',
+    gap: space.sm,
+  },
+  answerButton: {
+    flex: 1,
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: colors.surface,
+    borderRadius: radius.md,
+    borderWidth: 1.5,
+    borderColor: colors.line,
+    paddingVertical: space.md,
+    paddingHorizontal: space.sm,
   },
   answerSelected: {
-    borderColor: '#9BC3DF',
-    backgroundColor: '#EDF6FB',
+    borderColor: colors.info,
+    backgroundColor: colors.infoTint,
   },
   answerCorrect: {
-    borderColor: '#5EEAD4',
-    backgroundColor: '#EFF8F5',
+    borderColor: colors.low,
+    backgroundColor: colors.lowTint,
   },
   answerWrong: {
-    borderColor: '#FDA29B',
-    backgroundColor: '#FFF1F0',
+    borderColor: colors.danger,
+    backgroundColor: colors.dangerTint,
   },
   answerText: {
-    color: '#17212B',
-    fontSize: 18,
-    fontWeight: '900',
+    fontSize: font.bodySm,
+    fontWeight: weight.semibold,
+    color: colors.ink,
   },
   feedbackPanel: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 8,
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
     borderWidth: 1,
-    borderColor: '#E4E7EC',
-    padding: 14,
-    gap: 10,
+    borderColor: colors.line,
+    padding: space.lg,
+    gap: space.md,
+    ...shadow.soft,
   },
   feedbackTitle: {
-    color: '#0B6E69',
-    fontSize: 22,
-    fontWeight: '900',
+    fontSize: font.h3,
+    fontWeight: weight.bold,
+    color: colors.low,
+    letterSpacing: -0.3,
   },
   feedbackWrong: {
-    color: '#B42318',
+    color: colors.high,
   },
+
+  // Progress bar ------------------------------------------------------------
+  progressTrack: {
+    height: 10,
+    borderRadius: radius.pill,
+    backgroundColor: 'rgba(255, 255, 255, 0.28)',
+    overflow: 'hidden',
+  },
+  progressFill: {
+    height: '100%',
+    borderRadius: radius.pill,
+    backgroundColor: colors.white,
+  },
+
+  // Bottom navigation -------------------------------------------------------
   bottomNav: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    minHeight: 98,
-    paddingTop: 10,
-    paddingBottom: 24,
-    paddingHorizontal: 8,
-    backgroundColor: '#FFFFFF',
-    borderTopWidth: 1,
-    borderTopColor: '#E4E7EC',
     flexDirection: 'row',
-    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    justifyContent: 'space-around',
+    backgroundColor: colors.surface,
+    borderTopWidth: 1,
+    borderTopColor: colors.line,
+    paddingTop: space.sm,
+    paddingBottom: Platform.OS === 'ios' ? 28 : space.md,
+    paddingHorizontal: space.sm,
   },
   navItem: {
     flex: 1,
     alignItems: 'center',
-    justifyContent: 'center',
     gap: 4,
-    minHeight: 64,
-    borderRadius: 8,
   },
-  navItemActive: {
-    backgroundColor: '#EFF8F5',
+  navIconWrap: {
+    width: 52,
+    height: 34,
+    borderRadius: radius.pill,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  navIconWrapActive: {
+    backgroundColor: colors.brandTint,
   },
   navLabel: {
-    color: '#667085',
-    fontSize: 14,
-    fontWeight: '900',
+    fontSize: font.tiny,
+    fontWeight: weight.medium,
+    color: colors.muted,
   },
   navLabelActive: {
-    color: '#0B6E69',
+    color: colors.brand,
+    fontWeight: weight.bold,
   },
+
+  // Emergency modal ---------------------------------------------------------
   modalScreen: {
     flex: 1,
-    backgroundColor: '#F4F7F5',
+    backgroundColor: colors.bg,
   },
   modalHeader: {
-    paddingTop: 56,
-    paddingHorizontal: 18,
-    paddingBottom: 12,
-    backgroundColor: '#FFFFFF',
-    borderBottomWidth: 1,
-    borderBottomColor: '#E4E7EC',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    gap: 12,
+    paddingTop: Platform.OS === 'ios' ? 58 : 40,
+    paddingBottom: space.md,
+    paddingHorizontal: space.xl,
+    backgroundColor: colors.surface,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.line,
   },
   modalTitle: {
-    flex: 1,
-    color: '#B42318',
-    fontSize: 25,
-    fontWeight: '900',
+    fontSize: font.h2,
+    fontWeight: weight.bold,
+    color: colors.ink,
+    letterSpacing: -0.4,
   },
   closeButton: {
-    width: 46,
-    height: 46,
-    borderRadius: 8,
+    width: 44,
+    height: 44,
+    borderRadius: radius.md,
+    backgroundColor: colors.surfaceMuted,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#F2F4F7',
   },
   modalContent: {
-    padding: 18,
-    paddingBottom: 36,
+    padding: space.xl,
+    paddingBottom: 60,
+  },
+
+  // QR camera ---------------------------------------------------------------
+  cameraFrame: {
+    borderRadius: radius.lg,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: colors.line,
+    backgroundColor: colors.ink,
+    ...shadow.card,
+  },
+  cameraView: {
+    width: '100%',
+    height: 280,
+  },
+  cameraHint: {
+    fontSize: font.bodySm,
+    fontWeight: weight.semibold,
+    color: colors.white,
+    textAlign: 'center',
+    paddingVertical: space.md,
+    backgroundColor: 'rgba(0, 0, 0, 0.55)',
   },
 });
