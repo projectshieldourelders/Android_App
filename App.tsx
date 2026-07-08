@@ -53,6 +53,7 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
+  useColorScheme,
   View,
 } from 'react-native';
 import type { DimensionValue, ImageStyle } from 'react-native';
@@ -74,7 +75,6 @@ import {
   analyzePhoneNumber,
   analyzeUrl,
   analyzeVoiceClone,
-  getLevelColor,
   labelForLevel,
 } from './src/services/scamAnalyzer';
 import {
@@ -261,16 +261,174 @@ const openingSteps: Array<{ title: string; detail?: string }> = [
   },
 ];
 
-function levelBackground(level: RiskLevel) {
+type AppTheme = {
+  mode: 'light' | 'dark';
+  statusBar: 'light' | 'dark';
+  background: string;
+  header: string;
+  surface: string;
+  surfaceRaised: string;
+  surfaceSoft: string;
+  text: string;
+  textStrong: string;
+  textMuted: string;
+  textSubtle: string;
+  placeholder: string;
+  border: string;
+  borderStrong: string;
+  inputBorder: string;
+  primary: string;
+  primarySoft: string;
+  primaryBorder: string;
+  primaryText: string;
+  inverseText: string;
+  blue: string;
+  blueSoft: string;
+  danger: string;
+  dangerStrong: string;
+  dangerSoft: string;
+  dangerBorder: string;
+  dangerTextSoft: string;
+  warning: string;
+  warningSoft: string;
+  cautionSoft: string;
+  successSoft: string;
+  successBorder: string;
+  disabledSurface: string;
+  disabledText: string;
+  pressed: string;
+  practice: string;
+  selected: string;
+  selectedBorder: string;
+  cameraOverlay: string;
+  shadow: string;
+  switchOffTrack: string;
+  switchOffThumb: string;
+};
+
+const lightTheme: AppTheme = {
+  mode: 'light',
+  statusBar: 'dark',
+  background: '#F4F7F5',
+  header: '#FEFFFE',
+  surface: '#FFFFFF',
+  surfaceRaised: '#FFFFFF',
+  surfaceSoft: '#F2F4F7',
+  text: '#17212B',
+  textStrong: '#17212B',
+  textMuted: '#344054',
+  textSubtle: '#667085',
+  placeholder: '#8A94A6',
+  border: '#E4E7EC',
+  borderStrong: '#D0D5DD',
+  inputBorder: '#D0D5DD',
+  primary: '#0B6E69',
+  primarySoft: '#EFF8F5',
+  primaryBorder: '#BFE3DA',
+  primaryText: '#FFFFFF',
+  inverseText: '#FFFFFF',
+  blue: '#245B8C',
+  blueSoft: '#EDF6FB',
+  danger: '#B42318',
+  dangerStrong: '#B3261E',
+  dangerSoft: '#FFF1F0',
+  dangerBorder: '#FDA29B',
+  dangerTextSoft: '#FFE9E7',
+  warning: '#C2410C',
+  warningSoft: '#FFF7ED',
+  cautionSoft: '#FFFBEB',
+  successSoft: '#EFF8F5',
+  successBorder: '#5EEAD4',
+  disabledSurface: '#F2F4F7',
+  disabledText: '#98A2B3',
+  pressed: '#F1F7F5',
+  practice: '#183A4A',
+  selected: '#EDF6FB',
+  selectedBorder: '#9BC3DF',
+  cameraOverlay: 'rgba(23,33,43,0.82)',
+  shadow: '#344054',
+  switchOffTrack: '#D8DFDA',
+  switchOffThumb: '#F9FAFB',
+};
+
+const darkTheme: AppTheme = {
+  mode: 'dark',
+  statusBar: 'light',
+  background: '#0D1418',
+  header: '#111B20',
+  surface: '#162128',
+  surfaceRaised: '#1C2931',
+  surfaceSoft: '#1A252B',
+  text: '#F5FAF8',
+  textStrong: '#FFFFFF',
+  textMuted: '#D7E0DD',
+  textSubtle: '#AEB9B6',
+  placeholder: '#8C9B98',
+  border: '#2A3940',
+  borderStrong: '#3C4F56',
+  inputBorder: '#3C4F56',
+  primary: '#6FD6C9',
+  primarySoft: '#12312F',
+  primaryBorder: '#276C64',
+  primaryText: '#071413',
+  inverseText: '#FFFFFF',
+  blue: '#8FBFE8',
+  blueSoft: '#142739',
+  danger: '#FF9A90',
+  dangerStrong: '#FF776D',
+  dangerSoft: '#351917',
+  dangerBorder: '#7A332E',
+  dangerTextSoft: '#FFE3DF',
+  warning: '#F6B261',
+  warningSoft: '#332416',
+  cautionSoft: '#302A15',
+  successSoft: '#12312F',
+  successBorder: '#3CB6A7',
+  disabledSurface: '#1A252B',
+  disabledText: '#667573',
+  pressed: '#1D2D33',
+  practice: '#102E3A',
+  selected: '#142E42',
+  selectedBorder: '#3F7198',
+  cameraOverlay: 'rgba(7,12,14,0.84)',
+  shadow: '#000000',
+  switchOffTrack: '#314248',
+  switchOffThumb: '#AEB9B6',
+};
+
+type AppStyles = ReturnType<typeof createStyles>;
+
+const DesignContext = React.createContext<{ styles: AppStyles; theme: AppTheme } | null>(null);
+
+function useDesign() {
+  const value = React.useContext(DesignContext);
+  if (!value) throw new Error('Design context is missing.');
+  return value;
+}
+
+function levelColor(theme: AppTheme, level: RiskLevel) {
   switch (level) {
     case 'stop':
-      return '#FFF1F0';
+      return theme.danger;
     case 'high':
-      return '#FFF7ED';
+      return theme.warning;
     case 'caution':
-      return '#FFFBEB';
+      return theme.warning;
     default:
-      return '#EFF8F5';
+      return theme.primary;
+  }
+}
+
+function levelBackground(theme: AppTheme, level: RiskLevel) {
+  switch (level) {
+    case 'stop':
+      return theme.dangerSoft;
+    case 'high':
+      return theme.warningSoft;
+    case 'caution':
+      return theme.cautionSoft;
+    default:
+      return theme.successSoft;
   }
 }
 
@@ -285,6 +443,9 @@ function normalizePhone(phone: string) {
 }
 
 export default function App() {
+  const colorScheme = useColorScheme();
+  const theme = colorScheme === 'dark' ? darkTheme : lightTheme;
+  const styles = useMemo(() => createStyles(theme), [theme]);
   const scrollRef = useRef<ScrollView>(null);
   const screenAnim = useRef(new Animated.Value(1)).current;
   const noticeAnim = useRef(new Animated.Value(1)).current;
@@ -731,7 +892,7 @@ export default function App() {
       <View style={styles.header}>
         <View style={styles.brandRow}>
           <View style={styles.logoMark}>
-            <Shield size={26} color="#FFFFFF" strokeWidth={2.6} />
+            <Shield size={30} color={theme.primaryText} strokeWidth={2.6} />
           </View>
           <View style={styles.brandText}>
             <Text style={styles.eyebrow}>Shield Our Elders</Text>
@@ -739,7 +900,7 @@ export default function App() {
           </View>
         </View>
         <View style={styles.privacyPill}>
-          <ShieldCheck size={15} color="#0B6E69" />
+          <ShieldCheck size={18} color={theme.primary} />
           <Text style={styles.privacyText}>Check before replying</Text>
         </View>
       </View>
@@ -762,7 +923,7 @@ export default function App() {
           const active = screen === item.screen;
           return (
             <TouchableOpacity key={item.screen} style={[styles.navItem, active && styles.navItemActive]} onPress={() => navigate(item.screen)} activeOpacity={0.75}>
-              <Icon size={21} color={active ? '#0B6E69' : '#667085'} strokeWidth={active ? 2.6 : 2.1} />
+              <Icon size={25} color={active ? theme.primary : theme.textSubtle} strokeWidth={active ? 2.7 : 2.2} />
               <Text style={[styles.navLabel, active && styles.navLabelActive]}>{item.label}</Text>
             </TouchableOpacity>
           );
@@ -783,7 +944,7 @@ export default function App() {
           <View style={styles.briefStepRow}>
             {openingSteps.map((step) => (
               <View key={step.title} style={styles.briefStep}>
-                <CheckCircle2 size={18} color="#0B6E69" strokeWidth={2.7} />
+                <CheckCircle2 size={22} color={theme.primary} strokeWidth={2.7} />
                 <Text style={styles.briefStepText}>{step.title}</Text>
               </View>
             ))}
@@ -800,12 +961,12 @@ export default function App() {
             navigate('emergency');
           }}
         >
-          <Siren size={36} color="#FFFFFF" strokeWidth={2.8} />
+          <Siren size={42} color={theme.primaryText} strokeWidth={2.8} />
           <View style={styles.emergencyTextWrap}>
             <Text style={styles.emergencyTitle}>I THINK THIS IS A SCAM</Text>
             <Text style={styles.emergencySub}>Show safety steps</Text>
           </View>
-          <ChevronRight size={30} color="#FFFFFF" />
+          <ChevronRight size={34} color={theme.primaryText} />
         </TouchableOpacity>
 
         <View style={styles.sectionHeader}>
@@ -858,7 +1019,7 @@ export default function App() {
           multiline
           textAlignVertical="top"
           placeholder="Paste message here"
-          placeholderTextColor="#8A94A6"
+          placeholderTextColor={theme.placeholder}
         />
         <View style={styles.buttonRow}>
           <SecondaryAction icon={Upload} label="Add screenshot" onPress={pickScreenshot} />
@@ -887,7 +1048,7 @@ export default function App() {
                 setOcrError('');
               }}
             >
-              <X size={22} color="#667085" />
+              <X size={26} color={theme.textSubtle} />
             </TouchableOpacity>
           </View>
         ) : null}
@@ -910,7 +1071,7 @@ export default function App() {
           multiline
           textAlignVertical="top"
           placeholder="Optional: paste a voicemail transcript here."
-          placeholderTextColor="#8A94A6"
+          placeholderTextColor={theme.placeholder}
         />
         {screenshotBase64 ? (
           <View style={styles.aiActionBox}>
@@ -989,7 +1150,7 @@ export default function App() {
     return (
       <View style={styles.stack}>
         <View style={styles.stopPanel}>
-          <Siren size={42} color="#B42318" strokeWidth={2.8} />
+          <Siren size={48} color={theme.danger} strokeWidth={2.8} />
           <Text style={styles.stopTitle}>Stop. You have time.</Text>
           <Text style={styles.stopText}>A real bank, agency, or family member can wait.</Text>
         </View>
@@ -1003,7 +1164,7 @@ export default function App() {
         ))}
         <TrustedContactStrip contacts={contacts} onCall={callContact} onText={textContact} urgent />
         <TouchableOpacity style={styles.primaryButton} onPress={() => Linking.openURL('https://reportfraud.ftc.gov/')}>
-          <ExternalLink size={20} color="#FFFFFF" />
+          <ExternalLink size={24} color={theme.primaryText} />
           <Text style={styles.primaryButtonText}>Open ReportFraud.ftc.gov</Text>
         </TouchableOpacity>
       </View>
@@ -1024,7 +1185,7 @@ export default function App() {
                 setContactDrafts((current) => current.map((item, itemIndex) => (itemIndex === index ? { ...item, name: value } : item)))
               }
               placeholder={index === 0 ? 'Daughter, son, caregiver, friend' : 'Backup contact'}
-              placeholderTextColor="#8A94A6"
+              placeholderTextColor={theme.placeholder}
             />
             <TextInput
               style={styles.input}
@@ -1034,7 +1195,7 @@ export default function App() {
               }
               keyboardType="phone-pad"
               placeholder="Phone number"
-              placeholderTextColor="#8A94A6"
+              placeholderTextColor={theme.placeholder}
             />
             <View style={styles.buttonRow}>
               <SecondaryAction icon={CheckCircle2} label="Save" onPress={() => saveContactDraft(index)} />
@@ -1051,10 +1212,10 @@ export default function App() {
             value={familyPhrase}
             onChangeText={setFamilyPhrase}
             placeholder="Example: blue porch light"
-            placeholderTextColor="#8A94A6"
+            placeholderTextColor={theme.placeholder}
           />
           <TouchableOpacity style={styles.primaryButton} onPress={savePhrase}>
-            <ShieldCheck size={20} color="#FFFFFF" />
+            <ShieldCheck size={24} color={theme.primaryText} />
             <Text style={styles.primaryButtonText}>Save phrase</Text>
           </TouchableOpacity>
         </View>
@@ -1073,7 +1234,7 @@ export default function App() {
           autoCapitalize="none"
           autoCorrect={false}
           placeholder="https://example.com"
-          placeholderTextColor="#8A94A6"
+          placeholderTextColor={theme.placeholder}
         />
         {hasUrlInput ? <RiskPanel result={linkResult} /> : null}
         <SecondaryAction icon={X} label="Clear" onPress={() => setUrlText('')} disabled={!hasUrlInput} />
@@ -1082,7 +1243,7 @@ export default function App() {
           onPress={() => openUrl(urlText)}
           disabled={!hasUrlInput}
         >
-          <ExternalLink size={20} color={hasUrlInput ? '#0B6E69' : '#98A2B3'} />
+          <ExternalLink size={24} color={hasUrlInput ? theme.primary : theme.disabledText} />
           <Text style={[styles.secondaryButtonWideText, !hasUrlInput && styles.disabledText]}>Open only if expected</Text>
         </TouchableOpacity>
       </View>
@@ -1097,7 +1258,7 @@ export default function App() {
         <Text style={styles.screenIntro}>Scan first. Open only after checking.</Text>
         {!canScan ? (
           <TouchableOpacity style={styles.primaryButton} onPress={requestCameraPermission}>
-            <Camera size={20} color="#FFFFFF" />
+            <Camera size={24} color={theme.primaryText} />
           <Text style={styles.primaryButtonText}>Allow camera for QR scan</Text>
           </TouchableOpacity>
         ) : null}
@@ -1113,7 +1274,7 @@ export default function App() {
           </View>
         ) : (
           <TouchableOpacity style={styles.primaryButton} onPress={() => setScanning(true)} disabled={!canScan}>
-            <QrCode size={20} color="#FFFFFF" />
+            <QrCode size={24} color={theme.primaryText} />
             <Text style={styles.primaryButtonText}>{qrValue ? 'Scan another QR code' : 'Start QR scan'}</Text>
           </TouchableOpacity>
         )}
@@ -1124,7 +1285,7 @@ export default function App() {
           autoCapitalize="none"
           autoCorrect={false}
           placeholder="QR destination appears here"
-          placeholderTextColor="#8A94A6"
+          placeholderTextColor={theme.placeholder}
         />
         {hasQrInput ? <RiskPanel result={qrResult} /> : null}
         <SecondaryAction icon={X} label="Clear" onPress={() => setQrValue('')} disabled={!hasQrInput} />
@@ -1133,7 +1294,7 @@ export default function App() {
           onPress={() => openUrl(qrValue)}
           disabled={!hasQrInput}
         >
-          <ExternalLink size={20} color={hasQrInput ? '#0B6E69' : '#98A2B3'} />
+          <ExternalLink size={24} color={hasQrInput ? theme.primary : theme.disabledText} />
           <Text style={[styles.secondaryButtonWideText, !hasQrInput && styles.disabledText]}>Open only if verified</Text>
         </TouchableOpacity>
       </View>
@@ -1155,7 +1316,7 @@ export default function App() {
             value={familyPhrase}
             onChangeText={setFamilyPhrase}
             placeholder="Private family phrase"
-            placeholderTextColor="#8A94A6"
+            placeholderTextColor={theme.placeholder}
           />
           <SecondaryAction icon={ShieldCheck} label="Save phrase" onPress={savePhrase} />
         </View>
@@ -1194,7 +1355,7 @@ export default function App() {
         <View style={styles.sectionHeader}>
           <Text style={styles.screenIntroNarrow}>Current warnings from public safety sources.</Text>
           <TouchableOpacity style={styles.refreshButton} onPress={refreshAlerts}>
-            <Newspaper size={18} color="#0B6E69" />
+            <Newspaper size={22} color={theme.primary} />
             <Text style={styles.refreshText}>Refresh</Text>
           </TouchableOpacity>
         </View>
@@ -1225,14 +1386,14 @@ export default function App() {
                   <Text style={styles.lessonTitle}>{lesson.title}</Text>
                   <Text style={styles.smallMuted}>{lesson.minutes} minute lesson</Text>
                 </View>
-                <GraduationCap size={24} color="#245B8C" />
+                <GraduationCap size={30} color={theme.blue} />
               </View>
               <Text style={styles.cardBody}>{lesson.summary}</Text>
               {open ? (
                 <View style={styles.lessonBody}>
                   {lesson.steps.map((step) => (
                     <View key={step} style={styles.bulletRow}>
-                      <CheckCircle2 size={19} color="#0B6E69" />
+                      <CheckCircle2 size={23} color={theme.primary} />
                       <Text style={styles.bulletText}>{step}</Text>
                     </View>
                   ))}
@@ -1243,7 +1404,7 @@ export default function App() {
           );
         })}
         <TouchableOpacity style={styles.primaryButton} onPress={() => navigate('practice')}>
-          <Trophy size={20} color="#FFFFFF" />
+          <Trophy size={24} color={theme.primaryText} />
           <Text style={styles.primaryButtonText}>Start practice</Text>
         </TouchableOpacity>
       </View>
@@ -1284,11 +1445,11 @@ export default function App() {
                 disabled={answered}
               >
                 {isCorrect ? (
-                  <CheckCircle2 size={21} color="#0B6E69" />
+                  <CheckCircle2 size={25} color={theme.primary} />
                 ) : isWrong ? (
-                  <X size={21} color="#B42318" />
+                  <X size={25} color={theme.danger} />
                 ) : (
-                  <Circle size={21} color={isSelected ? '#245B8C' : '#667085'} />
+                  <Circle size={25} color={isSelected ? theme.blue : theme.textSubtle} />
                 )}
                 <Text style={styles.answerText}>{option === 'safe' ? 'Safe' : option === 'suspicious' ? 'Not sure' : 'Scam'}</Text>
               </TouchableOpacity>
@@ -1303,12 +1464,12 @@ export default function App() {
             <Text style={styles.cardBody}>{practice.explanation}</Text>
             {practice.redFlags.map((flag) => (
               <View key={flag} style={styles.bulletRow}>
-                <AlertTriangle size={18} color="#C2410C" />
+                <AlertTriangle size={22} color={theme.warning} />
                 <Text style={styles.bulletText}>{flag}</Text>
               </View>
             ))}
             <TouchableOpacity style={styles.primaryButton} onPress={nextPractice}>
-              <ChevronRight size={20} color="#FFFFFF" />
+              <ChevronRight size={24} color={theme.primaryText} />
               <Text style={styles.primaryButtonText}>Next example</Text>
             </TouchableOpacity>
             <SecondaryAction icon={X} label="Restart quiz" onPress={restartPractice} />
@@ -1327,18 +1488,18 @@ export default function App() {
             <Text style={styles.cardTitle}>{group.title}</Text>
             {group.items.map((item) => (
               <View key={item} style={styles.bulletRow}>
-                <CheckCircle2 size={19} color="#0B6E69" />
+                <CheckCircle2 size={23} color={theme.primary} />
                 <Text style={styles.bulletText}>{item}</Text>
               </View>
             ))}
           </View>
         ))}
         <TouchableOpacity style={styles.primaryButton} onPress={() => Linking.openURL('https://reportfraud.ftc.gov/')}>
-          <ExternalLink size={20} color="#FFFFFF" />
+          <ExternalLink size={24} color={theme.primaryText} />
           <Text style={styles.primaryButtonText}>Report fraud to FTC</Text>
         </TouchableOpacity>
         <TouchableOpacity style={styles.secondaryButtonWide} onPress={() => Linking.openURL('https://www.ic3.gov/')}>
-          <ExternalLink size={20} color="#0B6E69" />
+          <ExternalLink size={24} color={theme.primary} />
           <Text style={styles.secondaryButtonWideText}>Report internet fraud to IC3</Text>
         </TouchableOpacity>
       </View>
@@ -1355,7 +1516,7 @@ export default function App() {
           onChangeText={setPhoneNumber}
           keyboardType="phone-pad"
           placeholder="Phone number"
-          placeholderTextColor="#8A94A6"
+          placeholderTextColor={theme.placeholder}
         />
         {hasPhoneInput ? <RiskPanel result={phoneResult} /> : null}
         <SecondaryAction icon={X} label="Clear" onPress={() => setPhoneNumber('')} disabled={!hasPhoneInput} />
@@ -1364,7 +1525,7 @@ export default function App() {
           onPress={openSearchForPhone}
           disabled={!hasPhoneInput}
         >
-          <Search size={20} color={hasPhoneInput ? '#0B6E69' : '#98A2B3'} />
+          <Search size={24} color={hasPhoneInput ? theme.primary : theme.disabledText} />
           <Text style={[styles.secondaryButtonWideText, !hasPhoneInput && styles.disabledText]}>Search public scam reports</Text>
         </TouchableOpacity>
       </View>
@@ -1378,7 +1539,7 @@ export default function App() {
       <View style={styles.stack}>
         <Text style={styles.screenIntro}>Upload a voicemail. The app can transcribe it.</Text>
         <TouchableOpacity style={styles.primaryButton} onPress={pickVoicemail}>
-          <FileAudio size={20} color="#FFFFFF" />
+          <FileAudio size={24} color={theme.primaryText} />
           <Text style={styles.primaryButtonText}>Upload voicemail</Text>
         </TouchableOpacity>
         {voicemailFile ? (
@@ -1412,7 +1573,7 @@ export default function App() {
           multiline
           textAlignVertical="top"
           placeholder="Paste voicemail transcript here."
-          placeholderTextColor="#8A94A6"
+          placeholderTextColor={theme.placeholder}
         />
         <SecondaryAction
           icon={X}
@@ -1469,48 +1630,50 @@ export default function App() {
   }
 
   return (
-    <KeyboardAvoidingView style={styles.app} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <StatusBar style="dark" />
-      {renderHeader()}
-      <ScrollView ref={scrollRef} style={styles.scroll} contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
-        <Animated.View
-          style={[
-            styles.screenTransition,
-            {
-              opacity: screenAnim,
-              transform: [
-                {
-                  translateY: screenAnim.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: [12, 0],
-                  }),
-                },
-              ],
-            },
-          ]}
-        >
-          {screen !== 'home' ? (
-            <TouchableOpacity style={styles.backButton} onPress={() => navigate('home')}>
-              <ChevronRight size={18} color="#0B6E69" style={styles.backIcon} />
-              <Text style={styles.backText}>Home</Text>
-            </TouchableOpacity>
-          ) : null}
-          {renderScreen()}
-        </Animated.View>
-      </ScrollView>
-      {renderBottomNav()}
-      <Modal visible={emergencyVisible && screen === 'emergency'} animationType="slide" onRequestClose={() => setEmergencyVisible(false)}>
-        <View style={styles.modalScreen}>
-          <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>Scam Safety Steps</Text>
-            <Pressable style={styles.closeButton} onPress={() => setEmergencyVisible(false)}>
-              <X size={24} color="#17212B" />
-            </Pressable>
+    <DesignContext.Provider value={{ styles, theme }}>
+      <KeyboardAvoidingView style={styles.app} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <StatusBar style={theme.statusBar} />
+        {renderHeader()}
+        <ScrollView ref={scrollRef} style={styles.scroll} contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
+          <Animated.View
+            style={[
+              styles.screenTransition,
+              {
+                opacity: screenAnim,
+                transform: [
+                  {
+                    translateY: screenAnim.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [12, 0],
+                    }),
+                  },
+                ],
+              },
+            ]}
+          >
+            {screen !== 'home' ? (
+              <TouchableOpacity style={styles.backButton} onPress={() => navigate('home')}>
+                <ChevronRight size={22} color={theme.primary} style={styles.backIcon} />
+                <Text style={styles.backText}>Home</Text>
+              </TouchableOpacity>
+            ) : null}
+            {renderScreen()}
+          </Animated.View>
+        </ScrollView>
+        {renderBottomNav()}
+        <Modal visible={emergencyVisible && screen === 'emergency'} animationType="slide" onRequestClose={() => setEmergencyVisible(false)}>
+          <View style={styles.modalScreen}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Scam Safety Steps</Text>
+              <Pressable style={styles.closeButton} onPress={() => setEmergencyVisible(false)}>
+                <X size={28} color={theme.text} />
+              </Pressable>
+            </View>
+            <ScrollView contentContainerStyle={styles.modalContent}>{renderEmergency()}</ScrollView>
           </View>
-          <ScrollView contentContainerStyle={styles.modalContent}>{renderEmergency()}</ScrollView>
-        </View>
-      </Modal>
-    </KeyboardAvoidingView>
+        </Modal>
+      </KeyboardAvoidingView>
+    </DesignContext.Provider>
   );
 }
 
@@ -1529,17 +1692,18 @@ function HomeActionButton({
   tone?: RiskLevel;
   last?: boolean;
 }) {
-  const color = tone ? getLevelColor(tone) : '#0B6E69';
+  const { styles, theme } = useDesign();
+  const color = tone ? levelColor(theme, tone) : theme.primary;
   return (
     <Pressable style={({ pressed }) => [styles.homeActionButton, !last && styles.homeActionDivider, pressed && styles.pressedRow]} onPress={onPress}>
-      <View style={[styles.homeActionIcon, { backgroundColor: tone ? levelBackground(tone) : '#E7F4F1' }]}>
-        <Icon size={30} color={color} strokeWidth={2.6} />
+      <View style={[styles.homeActionIcon, { backgroundColor: tone ? levelBackground(theme, tone) : theme.primarySoft }]}>
+        <Icon size={34} color={color} strokeWidth={2.6} />
       </View>
       <View style={styles.homeActionText}>
         <Text style={styles.homeActionTitle}>{label}</Text>
         <Text style={styles.homeActionDetail}>{detail}</Text>
       </View>
-      <ChevronRight size={30} color={color} strokeWidth={2.7} />
+      <ChevronRight size={32} color={color} strokeWidth={2.7} />
     </Pressable>
   );
 }
@@ -1560,17 +1724,18 @@ function ToolButton({
   tone?: RiskLevel;
   last?: boolean;
 }) {
-  const color = tone ? getLevelColor(tone) : '#0B6E69';
+  const { styles, theme } = useDesign();
+  const color = tone ? levelColor(theme, tone) : theme.primary;
   return (
     <Pressable style={({ pressed }) => [styles.toolButton, !last && styles.homeActionDivider, pressed && styles.pressedRow]} onPress={onPress}>
-      <View style={[styles.toolIcon, { backgroundColor: tone ? levelBackground(tone) : '#E7F4F1' }]}>
-        <Icon size={28} color={color} strokeWidth={2.45} />
+      <View style={[styles.toolIcon, { backgroundColor: tone ? levelBackground(theme, tone) : theme.primarySoft }]}>
+        <Icon size={32} color={color} strokeWidth={2.5} />
       </View>
       <View style={styles.toolText}>
         <Text style={styles.toolTitle}>{label}</Text>
         <Text style={styles.toolDetail}>{detail}</Text>
       </View>
-      <ChevronRight size={26} color={color} strokeWidth={2.6} />
+      <ChevronRight size={30} color={color} strokeWidth={2.6} />
     </Pressable>
   );
 }
@@ -1586,8 +1751,9 @@ function LiveNoticeCard({
   pulse: Animated.Value;
   onPress: () => void;
 }) {
+  const { styles, theme } = useDesign();
   const Icon = notice.icon;
-  const color = getLevelColor(notice.level);
+  const color = levelColor(theme, notice.level);
   const translateY = progress.interpolate({
     inputRange: [0, 1],
     outputRange: [-12, 0],
@@ -1611,18 +1777,18 @@ function LiveNoticeCard({
             style={[
               styles.liveNoticeIcon,
               {
-                backgroundColor: levelBackground(notice.level),
+                backgroundColor: levelBackground(theme, notice.level),
                 transform: [{ scale: pulseScale }],
               },
             ]}
           >
-            <Icon size={27} color={color} strokeWidth={2.65} />
+            <Icon size={31} color={color} strokeWidth={2.65} />
           </Animated.View>
           <View style={styles.liveNoticeText}>
             <Text style={styles.liveNoticeTitle}>{notice.title}</Text>
             <Text style={styles.liveNoticeBody}>{notice.body}</Text>
           </View>
-          <ChevronRight size={25} color={color} strokeWidth={2.6} />
+          <ChevronRight size={30} color={color} strokeWidth={2.6} />
         </View>
       </Animated.View>
     </Pressable>
@@ -1630,6 +1796,7 @@ function LiveNoticeCard({
 }
 
 function ExtractedTextPanel({ title, text }: { title: string; text: string }) {
+  const { styles } = useDesign();
   return (
     <View style={styles.scriptBox}>
       <Text style={styles.scriptLabel}>{title}</Text>
@@ -1639,10 +1806,11 @@ function ExtractedTextPanel({ title, text }: { title: string; text: string }) {
 }
 
 function SpamModelPanel({ review }: { review: HfSpamReview }) {
-  const color = getLevelColor(review.level);
+  const { styles, theme } = useDesign();
+  const color = levelColor(theme, review.level);
 
   return (
-    <View style={[styles.aiPanel, { backgroundColor: levelBackground(review.level), borderColor: color }]}>
+    <View style={[styles.aiPanel, { backgroundColor: levelBackground(theme, review.level), borderColor: color }]}>
       <View style={styles.riskTop}>
         <View style={styles.riskTextColumn}>
           <Text style={[styles.riskLabel, { color }]}>SMS spam check</Text>
@@ -1656,14 +1824,14 @@ function SpamModelPanel({ review }: { review: HfSpamReview }) {
       <Text style={styles.nextTitle}>Why it was flagged</Text>
       {review.reasons.map((reason) => (
         <View key={reason} style={styles.bulletRow}>
-          <AlertTriangle size={18} color={color} />
+          <AlertTriangle size={22} color={color} />
           <Text style={styles.bulletText}>{reason}</Text>
         </View>
       ))}
       <Text style={styles.nextTitle}>Do next</Text>
       {review.nextSteps.map((step) => (
         <View key={step} style={styles.bulletRow}>
-          <CheckCircle2 size={19} color="#0B6E69" />
+          <CheckCircle2 size={23} color={theme.primary} />
           <Text style={styles.bulletText}>{step}</Text>
         </View>
       ))}
@@ -1672,10 +1840,11 @@ function SpamModelPanel({ review }: { review: HfSpamReview }) {
 }
 
 function AiReviewPanel({ review }: { review: AiScamReview }) {
-  const color = getLevelColor(review.level);
+  const { styles, theme } = useDesign();
+  const color = levelColor(theme, review.level);
 
   return (
-    <View style={[styles.aiPanel, { backgroundColor: levelBackground(review.level), borderColor: color }]}>
+    <View style={[styles.aiPanel, { backgroundColor: levelBackground(theme, review.level), borderColor: color }]}>
       <View style={styles.riskTop}>
         <View style={styles.riskTextColumn}>
           <Text style={[styles.riskLabel, { color }]}>AI review</Text>
@@ -1695,14 +1864,14 @@ function AiReviewPanel({ review }: { review: AiScamReview }) {
       <Text style={styles.nextTitle}>Why it was flagged</Text>
       {review.reasons.map((reason) => (
         <View key={reason} style={styles.bulletRow}>
-          <AlertTriangle size={18} color={color} />
+          <AlertTriangle size={22} color={color} />
           <Text style={styles.bulletText}>{reason}</Text>
         </View>
       ))}
       <Text style={styles.nextTitle}>Do next</Text>
       {review.nextSteps.map((step) => (
         <View key={step} style={styles.bulletRow}>
-          <CheckCircle2 size={19} color="#0B6E69" />
+          <CheckCircle2 size={23} color={theme.primary} />
           <Text style={styles.bulletText}>{step}</Text>
         </View>
       ))}
@@ -1711,11 +1880,12 @@ function AiReviewPanel({ review }: { review: AiScamReview }) {
 }
 
 function RiskPanel({ result }: { result: AnalysisResult }) {
-  const color = getLevelColor(result.level);
+  const { styles, theme } = useDesign();
+  const color = levelColor(theme, result.level);
   const visibleFindings = [...result.findings].sort((left, right) => right.points - left.points).slice(0, 3);
   const hiddenFindingCount = Math.max(0, result.findings.length - visibleFindings.length);
   return (
-    <View style={[styles.riskPanel, { backgroundColor: levelBackground(result.level), borderColor: color }]}>
+    <View style={[styles.riskPanel, { backgroundColor: levelBackground(theme, result.level), borderColor: color }]}>
       <View style={styles.riskTop}>
         <View style={styles.riskTextColumn}>
           <Text style={[styles.riskLabel, { color }]}>{labelForLevel(result.level)}</Text>
@@ -1731,7 +1901,7 @@ function RiskPanel({ result }: { result: AnalysisResult }) {
           <Text style={styles.nextTitle}>Main signs</Text>
           {visibleFindings.map((finding) => (
             <View key={finding.id} style={styles.findingRow}>
-              <AlertTriangle size={19} color={getLevelColor(finding.severity)} />
+              <AlertTriangle size={23} color={levelColor(theme, finding.severity)} />
               <View style={styles.findingText}>
                 <Text style={styles.findingTitle}>{finding.title}</Text>
                 <Text style={styles.findingDetail}>{finding.detail}</Text>
@@ -1748,7 +1918,7 @@ function RiskPanel({ result }: { result: AnalysisResult }) {
       <Text style={styles.nextTitle}>Do next</Text>
       {result.nextSteps.map((step) => (
         <View key={step} style={styles.bulletRow}>
-          <CheckCircle2 size={19} color="#0B6E69" />
+          <CheckCircle2 size={23} color={theme.primary} />
           <Text style={styles.bulletText}>{step}</Text>
         </View>
       ))}
@@ -1757,14 +1927,15 @@ function RiskPanel({ result }: { result: AnalysisResult }) {
 }
 
 function ToggleRow({ label, value, onValueChange }: { label: string; value: boolean; onValueChange: (value: boolean) => void }) {
+  const { styles, theme } = useDesign();
   return (
     <View style={styles.toggleRow}>
       <Text style={styles.toggleLabel}>{label}</Text>
       <Switch
         value={value}
         onValueChange={onValueChange}
-        trackColor={{ false: '#D8DFDA', true: '#BFE3DA' }}
-        thumbColor={value ? '#0B6E69' : '#F9FAFB'}
+        trackColor={{ false: theme.switchOffTrack, true: theme.primaryBorder }}
+        thumbColor={value ? theme.primary : theme.switchOffThumb}
       />
     </View>
   );
@@ -1781,32 +1952,35 @@ function SecondaryAction({
   onPress: () => void;
   disabled?: boolean;
 }) {
+  const { styles, theme } = useDesign();
   return (
     <TouchableOpacity style={[styles.secondaryAction, disabled && styles.disabledButton]} onPress={onPress} disabled={disabled} activeOpacity={0.75}>
-      <Icon size={19} color={disabled ? '#98A2B3' : '#0B6E69'} />
+      <Icon size={23} color={disabled ? theme.disabledText : theme.primary} />
       <Text style={[styles.secondaryActionText, disabled && styles.disabledText]}>{label}</Text>
     </TouchableOpacity>
   );
 }
 
 function AttachmentLabel({ icon: Icon, label, onClear }: { icon: LucideIcon; label: string; onClear: () => void }) {
+  const { styles, theme } = useDesign();
   return (
     <View style={styles.attachment}>
       <View style={styles.toolIcon}>
-        <Icon size={22} color="#0B6E69" />
+        <Icon size={26} color={theme.primary} />
       </View>
       <View style={styles.attachmentText}>
         <Text style={styles.attachmentTitle}>{label}</Text>
         <Text style={styles.smallMuted}>Attached on this device</Text>
       </View>
       <TouchableOpacity onPress={onClear}>
-        <X size={22} color="#667085" />
+        <X size={26} color={theme.textSubtle} />
       </TouchableOpacity>
     </View>
   );
 }
 
 function ProgressBar({ value }: { value: number }) {
+  const { styles } = useDesign();
   const width = `${Math.max(6, Math.min(100, value))}%` as DimensionValue;
   return (
     <View style={styles.progressTrack}>
@@ -1826,6 +2000,7 @@ function TrustedContactStrip({
   onText: (contact: TrustedContact) => void;
   urgent?: boolean;
 }) {
+  const { styles, theme } = useDesign();
   return (
     <View style={[styles.contactStrip, urgent && styles.contactStripUrgent]}>
       <View style={styles.sectionHeader}>
@@ -1836,17 +2011,17 @@ function TrustedContactStrip({
         contacts.map((contact) => (
           <View key={contact.id} style={styles.contactRow}>
             <View style={styles.contactAvatar}>
-              <Users size={22} color="#0B6E69" />
+              <Users size={26} color={theme.primary} />
             </View>
             <View style={styles.contactInfo}>
               <Text style={styles.contactName}>{contact.name || contact.label}</Text>
               <Text style={styles.smallMuted}>{contact.phone}</Text>
             </View>
             <TouchableOpacity style={styles.iconButton} onPress={() => onCall(contact)}>
-              <Phone size={21} color="#0B6E69" />
+              <Phone size={25} color={theme.primary} />
             </TouchableOpacity>
             <TouchableOpacity style={styles.iconButton} onPress={() => onText(contact)}>
-              <MessageCircle size={21} color="#0B6E69" />
+              <MessageCircle size={25} color={theme.primary} />
             </TouchableOpacity>
           </View>
         ))
@@ -1857,29 +2032,30 @@ function TrustedContactStrip({
   );
 }
 
-const styles = StyleSheet.create({
+function createStyles(theme: AppTheme) {
+  return StyleSheet.create({
   app: {
     flex: 1,
-    backgroundColor: '#F4F7F5',
+    backgroundColor: theme.background,
   },
   header: {
-    paddingTop: 48,
-    paddingHorizontal: 20,
-    paddingBottom: 12,
-    backgroundColor: '#FEFFFE',
+    paddingTop: 52,
+    paddingHorizontal: 22,
+    paddingBottom: 16,
+    backgroundColor: theme.header,
     borderBottomWidth: 1,
-    borderBottomColor: '#DDE4DE',
+    borderBottomColor: theme.border,
   },
   brandRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: 14,
   },
   logoMark: {
-    width: 46,
-    height: 46,
+    width: 54,
+    height: 54,
     borderRadius: 8,
-    backgroundColor: '#0B6E69',
+    backgroundColor: theme.primary,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1887,114 +2063,116 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   eyebrow: {
-    color: '#245B8C',
-    fontSize: 13,
-    fontWeight: '800',
+    color: theme.blue,
+    fontSize: 14,
+    lineHeight: 18,
+    fontWeight: '900',
   },
   title: {
-    color: '#17212B',
-    fontSize: 24,
+    color: theme.text,
+    fontSize: 28,
     fontWeight: '900',
-    lineHeight: 29,
+    lineHeight: 34,
   },
   privacyPill: {
-    marginTop: 10,
+    marginTop: 12,
     alignSelf: 'flex-start',
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    backgroundColor: '#EFF8F5',
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    backgroundColor: theme.primarySoft,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#C9E8DF',
+    borderColor: theme.primaryBorder,
   },
   privacyText: {
-    color: '#0B6E69',
-    fontSize: 13,
+    color: theme.primary,
+    fontSize: 15,
     fontWeight: '800',
   },
   scroll: {
     flex: 1,
   },
   scrollContent: {
-    padding: 18,
-    paddingBottom: 128,
+    padding: 20,
+    paddingBottom: 142,
   },
   screenTransition: {
     flex: 1,
   },
   stack: {
-    gap: 16,
+    gap: 18,
   },
   backButton: {
+    minHeight: 48,
     alignSelf: 'flex-start',
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
+    gap: 6,
     paddingVertical: 8,
-    paddingRight: 12,
+    paddingRight: 14,
     marginBottom: 8,
   },
   backIcon: {
     transform: [{ rotate: '180deg' }],
   },
   backText: {
-    color: '#0B6E69',
-    fontSize: 16,
-    fontWeight: '800',
+    color: theme.primary,
+    fontSize: 18,
+    fontWeight: '900',
   },
   homeHero: {
-    paddingTop: 2,
-    paddingBottom: 2,
-    gap: 10,
+    paddingTop: 4,
+    paddingBottom: 4,
+    gap: 12,
   },
   homeHeroLabel: {
-    color: '#0B6E69',
-    fontSize: 13,
+    color: theme.primary,
+    fontSize: 14,
     fontWeight: '900',
     textTransform: 'uppercase',
   },
   homeHeroTitle: {
-    color: '#17212B',
-    fontSize: 30,
-    lineHeight: 36,
+    color: theme.text,
+    fontSize: 38,
+    lineHeight: 44,
     fontWeight: '900',
   },
   homeHeroText: {
-    color: '#475467',
-    fontSize: 19,
-    lineHeight: 28,
+    color: theme.textMuted,
+    fontSize: 21,
+    lineHeight: 31,
     fontWeight: '700',
   },
   briefStepRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 8,
+    gap: 10,
   },
   briefStep: {
-    minHeight: 38,
+    minHeight: 48,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 10,
+    gap: 8,
+    paddingHorizontal: 12,
     borderRadius: 8,
-    backgroundColor: '#EFF8F5',
+    backgroundColor: theme.primarySoft,
   },
   briefStepText: {
-    color: '#17212B',
-    fontSize: 16,
+    color: theme.text,
+    fontSize: 18,
     fontWeight: '900',
   },
   liveNotice: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: theme.surface,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#DDE4DE',
-    padding: 14,
-    gap: 10,
-    shadowColor: '#344054',
+    borderColor: theme.border,
+    padding: 18,
+    gap: 14,
+    shadowColor: theme.shadow,
     shadowOffset: { width: 0, height: 5 },
     shadowOpacity: 0.08,
     shadowRadius: 14,
@@ -2004,38 +2182,38 @@ const styles = StyleSheet.create({
     transform: [{ scale: 0.995 }],
   },
   liveNoticeTop: {
-    minHeight: 30,
+    minHeight: 34,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: 10,
   },
   liveNoticeKicker: {
-    color: '#245B8C',
-    fontSize: 13,
+    color: theme.blue,
+    fontSize: 14,
     fontWeight: '900',
     textTransform: 'uppercase',
   },
   liveNoticeBadge: {
-    minHeight: 30,
-    paddingHorizontal: 10,
+    minHeight: 34,
+    paddingHorizontal: 12,
     borderRadius: 8,
     borderWidth: 1,
     justifyContent: 'center',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: theme.surface,
   },
   liveNoticeBadgeText: {
-    fontSize: 13,
+    fontSize: 14,
     fontWeight: '900',
   },
   liveNoticeContent: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: 14,
   },
   liveNoticeIcon: {
-    width: 54,
-    height: 54,
+    width: 62,
+    height: 62,
     borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
@@ -2044,28 +2222,28 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   liveNoticeTitle: {
-    color: '#17212B',
-    fontSize: 20,
-    lineHeight: 25,
+    color: theme.text,
+    fontSize: 23,
+    lineHeight: 29,
     fontWeight: '900',
   },
   liveNoticeBody: {
     marginTop: 3,
-    color: '#475467',
-    fontSize: 16,
-    lineHeight: 23,
+    color: theme.textMuted,
+    fontSize: 18,
+    lineHeight: 27,
     fontWeight: '700',
   },
   emergencyButton: {
-    minHeight: 108,
-    backgroundColor: '#B3261E',
+    minHeight: 122,
+    backgroundColor: theme.dangerStrong,
     borderRadius: 8,
-    paddingHorizontal: 18,
-    paddingVertical: 16,
+    paddingHorizontal: 20,
+    paddingVertical: 18,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 14,
-    shadowColor: '#7A271A',
+    shadowColor: theme.shadow,
     shadowOffset: { width: 0, height: 5 },
     shadowOpacity: 0.18,
     shadowRadius: 12,
@@ -2075,15 +2253,15 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   emergencyTitle: {
-    color: '#FFFFFF',
-    fontSize: 25,
+    color: theme.primaryText,
+    fontSize: 28,
     fontWeight: '900',
     lineHeight: 31,
   },
   emergencySub: {
     marginTop: 4,
-    color: '#FFE9E7',
-    fontSize: 18,
+    color: theme.dangerTextSoft,
+    fontSize: 19,
     fontWeight: '700',
   },
   sectionHeader: {
@@ -2093,8 +2271,8 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   sectionTitle: {
-    color: '#17212B',
-    fontSize: 24,
+    color: theme.text,
+    fontSize: 27,
     fontWeight: '900',
   },
   textLinkButton: {
@@ -2103,7 +2281,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
   },
   inlineLink: {
-    color: '#0B6E69',
+    color: theme.primary,
     fontSize: 18,
     fontWeight: '900',
   },
@@ -2111,24 +2289,24 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   homeActionGroup: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: theme.surface,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#DDE4DE',
+    borderColor: theme.border,
     overflow: 'hidden',
-    shadowColor: '#344054',
+    shadowColor: theme.shadow,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.06,
     shadowRadius: 10,
     elevation: 1,
   },
   toolListGroup: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: theme.surface,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#DDE4DE',
+    borderColor: theme.border,
     overflow: 'hidden',
-    shadowColor: '#344054',
+    shadowColor: theme.shadow,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.06,
     shadowRadius: 10,
@@ -2138,31 +2316,31 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   toolSectionTitle: {
-    color: '#344054',
+    color: theme.textMuted,
     fontSize: 17,
     lineHeight: 23,
     fontWeight: '900',
   },
   homeActionButton: {
-    minHeight: 90,
-    backgroundColor: '#FFFFFF',
-    paddingHorizontal: 15,
-    paddingVertical: 13,
+    minHeight: 100,
+    backgroundColor: theme.surface,
+    paddingHorizontal: 16,
+    paddingVertical: 15,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 13,
+    gap: 15,
   },
   homeActionDivider: {
     borderBottomWidth: 1,
-    borderBottomColor: '#E4E9E5',
+    borderBottomColor: theme.border,
   },
   pressedRow: {
-    backgroundColor: '#F1F7F5',
+    backgroundColor: theme.pressed,
     transform: [{ scale: 0.995 }],
   },
   homeActionIcon: {
-    width: 54,
-    height: 54,
+    width: 64,
+    height: 64,
     borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
@@ -2171,32 +2349,32 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   homeActionTitle: {
-    color: '#17212B',
-    fontSize: 21,
-    lineHeight: 27,
+    color: theme.text,
+    fontSize: 23,
+    lineHeight: 29,
     fontWeight: '900',
   },
   homeActionDetail: {
     marginTop: 4,
-    color: '#475467',
-    fontSize: 16,
-    lineHeight: 22,
+    color: theme.textMuted,
+    fontSize: 18,
+    lineHeight: 25,
     fontWeight: '700',
   },
   toolButton: {
-    minHeight: 92,
-    backgroundColor: '#FFFFFF',
-    paddingHorizontal: 14,
-    paddingVertical: 13,
+    minHeight: 102,
+    backgroundColor: theme.surface,
+    paddingHorizontal: 16,
+    paddingVertical: 15,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 13,
+    gap: 15,
   },
   toolIcon: {
-    width: 56,
-    height: 56,
+    width: 64,
+    height: 64,
     borderRadius: 8,
-    backgroundColor: '#E7F4F1',
+    backgroundColor: theme.primarySoft,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -2204,20 +2382,20 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   toolTitle: {
-    color: '#17212B',
-    fontSize: 21,
-    lineHeight: 27,
+    color: theme.text,
+    fontSize: 23,
+    lineHeight: 29,
     fontWeight: '900',
   },
   toolDetail: {
     marginTop: 3,
-    color: '#667085',
-    fontSize: 16,
-    lineHeight: 22,
+    color: theme.textSubtle,
+    fontSize: 18,
+    lineHeight: 25,
     fontWeight: '700',
   },
   metricLabel: {
-    color: '#667085',
+    color: theme.textSubtle,
     fontSize: 16,
     fontWeight: '800',
   },
@@ -2228,12 +2406,12 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   metricSmall: {
-    color: '#475467',
+    color: theme.textMuted,
     fontSize: 15,
     fontWeight: '900',
   },
   metricValue: {
-    color: '#17212B',
+    color: theme.text,
     fontSize: 34,
     fontWeight: '900',
     lineHeight: 38,
@@ -2241,103 +2419,103 @@ const styles = StyleSheet.create({
   progressTrack: {
     height: 10,
     borderRadius: 5,
-    backgroundColor: '#E4E7EC',
+    backgroundColor: theme.border,
     overflow: 'hidden',
   },
   progressFill: {
     height: '100%',
-    backgroundColor: '#0B6E69',
+    backgroundColor: theme.primary,
   },
   contactStrip: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: theme.surface,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#E4E7EC',
+    borderColor: theme.border,
     padding: 14,
     gap: 12,
   },
   contactStripUrgent: {
-    borderColor: '#FDA29B',
-    backgroundColor: '#FFF8F7',
+    borderColor: theme.dangerBorder,
+    backgroundColor: theme.dangerSoft,
   },
   contactRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    minHeight: 68,
+    minHeight: 74,
   },
   contactAvatar: {
-    width: 44,
-    height: 44,
+    width: 52,
+    height: 52,
     borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#EFF8F5',
+    backgroundColor: theme.primarySoft,
   },
   contactInfo: {
     flex: 1,
   },
   contactName: {
-    color: '#17212B',
-    fontSize: 17,
+    color: theme.text,
+    fontSize: 19,
     fontWeight: '900',
   },
   iconButton: {
-    width: 54,
-    height: 54,
+    width: 58,
+    height: 58,
     borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#E7F4F1',
+    backgroundColor: theme.primarySoft,
     borderWidth: 1,
-    borderColor: '#BFE3DA',
+    borderColor: theme.primaryBorder,
   },
   screenIntro: {
-    color: '#344054',
-    fontSize: 19,
-    lineHeight: 29,
+    color: theme.textMuted,
+    fontSize: 21,
+    lineHeight: 31,
     fontWeight: '700',
   },
   screenIntroNarrow: {
     flex: 1,
-    color: '#344054',
-    fontSize: 16,
-    lineHeight: 23,
-    fontWeight: '600',
+    color: theme.textMuted,
+    fontSize: 18,
+    lineHeight: 26,
+    fontWeight: '700',
   },
   textArea: {
-    minHeight: 170,
+    minHeight: 184,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#D0D5DD',
-    backgroundColor: '#FFFFFF',
-    padding: 14,
-    color: '#17212B',
-    fontSize: 19,
-    lineHeight: 28,
+    borderColor: theme.inputBorder,
+    backgroundColor: theme.surface,
+    padding: 16,
+    color: theme.text,
+    fontSize: 20,
+    lineHeight: 30,
     fontWeight: '600',
   },
   textAreaSmall: {
-    minHeight: 110,
+    minHeight: 124,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#D0D5DD',
-    backgroundColor: '#FFFFFF',
-    padding: 14,
-    color: '#17212B',
-    fontSize: 18,
-    lineHeight: 26,
+    borderColor: theme.inputBorder,
+    backgroundColor: theme.surface,
+    padding: 16,
+    color: theme.text,
+    fontSize: 20,
+    lineHeight: 29,
     fontWeight: '600',
   },
   input: {
-    minHeight: 62,
+    minHeight: 68,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#D0D5DD',
-    backgroundColor: '#FFFFFF',
-    paddingHorizontal: 13,
-    color: '#17212B',
-    fontSize: 19,
+    borderColor: theme.inputBorder,
+    backgroundColor: theme.surface,
+    paddingHorizontal: 16,
+    color: theme.text,
+    fontSize: 20,
     fontWeight: '700',
   },
   buttonRow: {
@@ -2346,36 +2524,36 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   secondaryAction: {
-    minHeight: 56,
-    paddingHorizontal: 12,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#BFE3DA',
-    backgroundColor: '#EFF8F5',
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-  },
-  secondaryActionText: {
-    color: '#0B6E69',
-    fontSize: 17,
-    fontWeight: '900',
-  },
-  secondaryButtonWide: {
-    minHeight: 62,
+    minHeight: 60,
     paddingHorizontal: 14,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#BFE3DA',
-    backgroundColor: '#EFF8F5',
+    borderColor: theme.primaryBorder,
+    backgroundColor: theme.primarySoft,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 9,
+  },
+  secondaryActionText: {
+    color: theme.primary,
+    fontSize: 18,
+    fontWeight: '900',
+  },
+  secondaryButtonWide: {
+    minHeight: 68,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: theme.primaryBorder,
+    backgroundColor: theme.primarySoft,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
   },
   secondaryButtonWideText: {
-    color: '#0B6E69',
+    color: theme.primary,
     fontSize: 18,
     fontWeight: '900',
   },
@@ -2383,29 +2561,29 @@ const styles = StyleSheet.create({
     opacity: 0.45,
   },
   disabledText: {
-    color: '#98A2B3',
+    color: theme.disabledText,
   },
   primaryButton: {
-    minHeight: 64,
+    minHeight: 70,
     borderRadius: 8,
-    paddingHorizontal: 14,
-    backgroundColor: '#0B6E69',
+    paddingHorizontal: 16,
+    backgroundColor: theme.primary,
     alignItems: 'center',
     justifyContent: 'center',
     flexDirection: 'row',
     gap: 9,
   },
   primaryButtonText: {
-    color: '#FFFFFF',
-    fontSize: 19,
+    color: theme.primaryText,
+    fontSize: 20,
     fontWeight: '900',
   },
   attachment: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: theme.surface,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#E4E7EC',
-    padding: 10,
+    borderColor: theme.border,
+    padding: 12,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
@@ -2414,39 +2592,39 @@ const styles = StyleSheet.create({
     width: 58,
     height: 58,
     borderRadius: 8,
-    backgroundColor: '#F2F4F7',
+    backgroundColor: theme.disabledSurface,
   },
   attachmentText: {
     flex: 1,
   },
   attachmentTitle: {
-    color: '#17212B',
-    fontSize: 16,
+    color: theme.text,
+    fontSize: 18,
     fontWeight: '900',
   },
   smallMuted: {
-    color: '#667085',
-    fontSize: 14,
-    lineHeight: 19,
-    fontWeight: '600',
+    color: theme.textSubtle,
+    fontSize: 15,
+    lineHeight: 21,
+    fontWeight: '700',
   },
   riskPanel: {
     borderRadius: 8,
     borderWidth: 1.5,
-    padding: 15,
-    gap: 12,
+    padding: 18,
+    gap: 14,
   },
   aiPanel: {
     borderRadius: 8,
     borderWidth: 1.5,
-    padding: 15,
-    gap: 12,
+    padding: 18,
+    gap: 14,
   },
   aiActionBox: {
     gap: 8,
   },
   errorText: {
-    color: '#B42318',
+    color: theme.danger,
     fontSize: 16,
     lineHeight: 23,
     fontWeight: '800',
@@ -2461,47 +2639,47 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   riskLabel: {
-    fontSize: 15,
+    fontSize: 16,
     fontWeight: '900',
     textTransform: 'uppercase',
   },
   riskHeadline: {
     marginTop: 3,
-    color: '#17212B',
-    fontSize: 22,
-    lineHeight: 28,
+    color: theme.text,
+    fontSize: 24,
+    lineHeight: 30,
     fontWeight: '900',
-    maxWidth: 260,
+    maxWidth: 300,
   },
   scoreBadge: {
-    width: 58,
-    height: 58,
+    width: 64,
+    height: 64,
     borderRadius: 8,
     borderWidth: 2,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: theme.surface,
   },
   scoreText: {
-    fontSize: 24,
+    fontSize: 26,
     fontWeight: '900',
   },
   card: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: theme.surface,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#E4E7EC',
-    padding: 14,
-    gap: 12,
+    borderColor: theme.border,
+    padding: 16,
+    gap: 14,
   },
   cardTitle: {
-    color: '#17212B',
-    fontSize: 21,
-    lineHeight: 27,
+    color: theme.text,
+    fontSize: 23,
+    lineHeight: 29,
     fontWeight: '900',
   },
   cardBody: {
-    color: '#344054',
+    color: theme.textMuted,
     fontSize: 18,
     lineHeight: 27,
     fontWeight: '700',
@@ -2513,48 +2691,48 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 9,
     alignItems: 'flex-start',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: theme.surface,
     borderRadius: 8,
-    padding: 10,
+    padding: 12,
   },
   findingText: {
     flex: 1,
   },
   findingTitle: {
-    color: '#17212B',
-    fontSize: 18,
+    color: theme.text,
+    fontSize: 19,
     fontWeight: '900',
   },
   findingDetail: {
     marginTop: 3,
-    color: '#475467',
+    color: theme.textMuted,
     fontSize: 17,
     lineHeight: 25,
     fontWeight: '700',
   },
   scriptBox: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: theme.surface,
     borderRadius: 8,
-    padding: 12,
+    padding: 14,
     borderWidth: 1,
-    borderColor: '#E4E7EC',
+    borderColor: theme.border,
   },
   scriptLabel: {
-    color: '#245B8C',
-    fontSize: 13,
+    color: theme.blue,
+    fontSize: 14,
     fontWeight: '900',
     textTransform: 'uppercase',
   },
   scriptText: {
     marginTop: 5,
-    color: '#17212B',
+    color: theme.text,
     fontSize: 19,
     lineHeight: 27,
     fontWeight: '800',
   },
   nextTitle: {
-    color: '#17212B',
-    fontSize: 18,
+    color: theme.text,
+    fontSize: 20,
     fontWeight: '900',
   },
   bulletRow: {
@@ -2564,19 +2742,19 @@ const styles = StyleSheet.create({
   },
   bulletText: {
     flex: 1,
-    color: '#344054',
+    color: theme.textMuted,
     fontSize: 18,
     lineHeight: 27,
     fontWeight: '700',
   },
   toggleRow: {
-    minHeight: 78,
-    backgroundColor: '#FFFFFF',
+    minHeight: 84,
+    backgroundColor: theme.surface,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#E4E7EC',
-    paddingHorizontal: 14,
-    paddingVertical: 10,
+    borderColor: theme.border,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -2584,60 +2762,60 @@ const styles = StyleSheet.create({
   },
   toggleLabel: {
     flex: 1,
-    color: '#17212B',
-    fontSize: 19,
-    lineHeight: 27,
+    color: theme.text,
+    fontSize: 20,
+    lineHeight: 28,
     fontWeight: '800',
   },
   stopPanel: {
-    backgroundColor: '#FFF1F0',
-    borderColor: '#FDA29B',
+    backgroundColor: theme.dangerSoft,
+    borderColor: theme.dangerBorder,
     borderWidth: 1,
     borderRadius: 8,
-    padding: 16,
-    gap: 9,
+    padding: 18,
+    gap: 10,
   },
   stopTitle: {
-    color: '#B42318',
-    fontSize: 28,
-    lineHeight: 34,
+    color: theme.danger,
+    fontSize: 31,
+    lineHeight: 37,
     fontWeight: '900',
   },
   stopText: {
-    color: '#344054',
+    color: theme.textMuted,
     fontSize: 17,
     lineHeight: 24,
     fontWeight: '700',
   },
   stepRow: {
-    minHeight: 62,
-    backgroundColor: '#FFFFFF',
+    minHeight: 70,
+    backgroundColor: theme.surface,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#E4E7EC',
+    borderColor: theme.border,
     padding: 12,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
   },
   stepNumber: {
-    width: 38,
-    height: 38,
+    width: 42,
+    height: 42,
     borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#B42318',
+    backgroundColor: theme.danger,
   },
   stepNumberText: {
-    color: '#FFFFFF',
+    color: theme.primaryText,
     fontSize: 18,
     fontWeight: '900',
   },
   stepText: {
     flex: 1,
-    color: '#17212B',
-    fontSize: 19,
-    lineHeight: 25,
+    color: theme.text,
+    fontSize: 20,
+    lineHeight: 27,
     fontWeight: '900',
   },
   cameraFrame: {
@@ -2645,8 +2823,8 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     borderRadius: 8,
     borderWidth: 2,
-    borderColor: '#0B6E69',
-    backgroundColor: '#17212B',
+    borderColor: theme.primary,
+    backgroundColor: theme.text,
   },
   cameraView: {
     flex: 1,
@@ -2660,35 +2838,35 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     textAlign: 'center',
     textAlignVertical: 'center',
-    backgroundColor: 'rgba(23,33,43,0.82)',
-    color: '#FFFFFF',
+    backgroundColor: theme.cameraOverlay,
+    color: theme.inverseText,
     fontSize: 17,
     fontWeight: '900',
     paddingVertical: 10,
   },
   refreshButton: {
-    minHeight: 44,
-    paddingHorizontal: 12,
+    minHeight: 50,
+    paddingHorizontal: 14,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#BFE3DA',
-    backgroundColor: '#EFF8F5',
+    borderColor: theme.primaryBorder,
+    backgroundColor: theme.primarySoft,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
   },
   refreshText: {
-    color: '#0B6E69',
-    fontSize: 15,
+    color: theme.primary,
+    fontSize: 16,
     fontWeight: '900',
   },
   newsItem: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: theme.surface,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#E4E7EC',
-    padding: 14,
-    gap: 8,
+    borderColor: theme.border,
+    padding: 16,
+    gap: 10,
   },
   newsTop: {
     flexDirection: 'row',
@@ -2696,29 +2874,29 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   newsSource: {
-    color: '#245B8C',
+    color: theme.blue,
     fontSize: 13,
     fontWeight: '900',
     textTransform: 'uppercase',
   },
   newsDate: {
-    color: '#667085',
+    color: theme.textSubtle,
     fontSize: 13,
     fontWeight: '800',
   },
   newsTitle: {
-    color: '#17212B',
-    fontSize: 19,
-    lineHeight: 25,
+    color: theme.text,
+    fontSize: 21,
+    lineHeight: 27,
     fontWeight: '900',
   },
   lessonItem: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: theme.surface,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#E4E7EC',
-    padding: 14,
-    gap: 10,
+    borderColor: theme.border,
+    padding: 16,
+    gap: 12,
   },
   lessonHeader: {
     flexDirection: 'row',
@@ -2727,98 +2905,98 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   lessonTitle: {
-    color: '#17212B',
-    fontSize: 20,
+    color: theme.text,
+    fontSize: 22,
     fontWeight: '900',
   },
   lessonBody: {
     gap: 9,
   },
   rememberText: {
-    color: '#245B8C',
-    fontSize: 16,
-    lineHeight: 23,
+    color: theme.blue,
+    fontSize: 18,
+    lineHeight: 26,
     fontWeight: '900',
   },
   confidencePanel: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: theme.surface,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#E4E7EC',
-    padding: 14,
-    gap: 9,
+    borderColor: theme.border,
+    padding: 16,
+    gap: 12,
   },
   practiceCard: {
-    backgroundColor: '#183A4A',
+    backgroundColor: theme.practice,
     borderRadius: 8,
-    padding: 18,
-    gap: 10,
+    padding: 20,
+    gap: 12,
   },
   practiceText: {
-    color: '#FFFFFF',
-    fontSize: 23,
-    lineHeight: 31,
+    color: theme.inverseText,
+    fontSize: 24,
+    lineHeight: 33,
     fontWeight: '900',
   },
   optionGrid: {
     gap: 10,
   },
   answerButton: {
-    minHeight: 58,
-    backgroundColor: '#FFFFFF',
+    minHeight: 64,
+    backgroundColor: theme.surface,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#E4E7EC',
+    borderColor: theme.border,
     paddingHorizontal: 14,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
   },
   answerSelected: {
-    borderColor: '#9BC3DF',
-    backgroundColor: '#EDF6FB',
+    borderColor: theme.selectedBorder,
+    backgroundColor: theme.selected,
   },
   answerCorrect: {
-    borderColor: '#5EEAD4',
-    backgroundColor: '#EFF8F5',
+    borderColor: theme.successBorder,
+    backgroundColor: theme.primarySoft,
   },
   answerWrong: {
-    borderColor: '#FDA29B',
-    backgroundColor: '#FFF1F0',
+    borderColor: theme.dangerBorder,
+    backgroundColor: theme.dangerSoft,
   },
   answerText: {
-    color: '#17212B',
-    fontSize: 18,
+    color: theme.text,
+    fontSize: 20,
     fontWeight: '900',
   },
   feedbackPanel: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: theme.surface,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#E4E7EC',
-    padding: 14,
-    gap: 10,
+    borderColor: theme.border,
+    padding: 16,
+    gap: 12,
   },
   feedbackTitle: {
-    color: '#0B6E69',
-    fontSize: 22,
+    color: theme.primary,
+    fontSize: 24,
     fontWeight: '900',
   },
   feedbackWrong: {
-    color: '#B42318',
+    color: theme.danger,
   },
   bottomNav: {
     position: 'absolute',
     left: 0,
     right: 0,
     bottom: 0,
-    minHeight: 98,
-    paddingTop: 10,
+    minHeight: 106,
+    paddingTop: 12,
     paddingBottom: 24,
     paddingHorizontal: 8,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: theme.surface,
     borderTopWidth: 1,
-    borderTopColor: '#E4E7EC',
+    borderTopColor: theme.border,
     flexDirection: 'row',
     justifyContent: 'space-between',
   },
@@ -2826,32 +3004,32 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 4,
-    minHeight: 64,
+    gap: 5,
+    minHeight: 70,
     borderRadius: 8,
   },
   navItemActive: {
-    backgroundColor: '#EFF8F5',
+    backgroundColor: theme.primarySoft,
   },
   navLabel: {
-    color: '#667085',
-    fontSize: 14,
+    color: theme.textSubtle,
+    fontSize: 15,
     fontWeight: '900',
   },
   navLabelActive: {
-    color: '#0B6E69',
+    color: theme.primary,
   },
   modalScreen: {
     flex: 1,
-    backgroundColor: '#F4F7F5',
+    backgroundColor: theme.background,
   },
   modalHeader: {
     paddingTop: 56,
     paddingHorizontal: 18,
     paddingBottom: 12,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: theme.surface,
     borderBottomWidth: 1,
-    borderBottomColor: '#E4E7EC',
+    borderBottomColor: theme.border,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -2859,20 +3037,21 @@ const styles = StyleSheet.create({
   },
   modalTitle: {
     flex: 1,
-    color: '#B42318',
-    fontSize: 25,
+    color: theme.danger,
+    fontSize: 28,
     fontWeight: '900',
   },
   closeButton: {
-    width: 46,
-    height: 46,
+    width: 52,
+    height: 52,
     borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#F2F4F7',
+    backgroundColor: theme.disabledSurface,
   },
   modalContent: {
     padding: 18,
     paddingBottom: 36,
   },
-});
+  });
+}
