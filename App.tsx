@@ -10,17 +10,17 @@ import {
   BookOpen,
   Camera,
   CheckCircle2,
-  ChevronDown,
   ChevronRight,
   Circle,
   CreditCard,
   ExternalLink,
   FileAudio,
   GraduationCap,
-  Home,
+  ChevronLeft,
   LayoutGrid,
   LifeBuoy,
   Link as LinkIcon,
+  Lock,
   Mail,
   MessageCircle,
   Mic,
@@ -37,6 +37,21 @@ import {
   Upload,
   Users,
   X,
+  House,
+  Info,
+  Menu,
+  Puzzle,
+  PhoneOff,
+  Ban,
+  KeyRound,
+  MonitorOff,
+  Shuffle,
+  Grid3x3,
+  ToggleLeft,
+  PenLine,
+  Flag,
+  Brain,
+  Flame,
 } from 'lucide-react-native';
 import type { LucideIcon } from 'lucide-react-native';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -44,6 +59,7 @@ import {
   ActivityIndicator,
   Alert,
   Animated,
+  Dimensions,
   Easing,
   Image,
   KeyboardAvoidingView,
@@ -53,16 +69,13 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
-  Switch,
-  Text,
-  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
-import type { DimensionValue, ImageStyle } from 'react-native';
+import type { ImageStyle } from 'react-native';
 
-import { emergencySteps, practiceExamples, recoverySteps, trustedContactMessage } from './src/data/content';
-import { modulesForDifficulty } from './src/data/curriculum';
+import { practiceExamples, recoverySteps, trustedContactMessage } from './src/data/content';
+import { daysUntilUnlock, isWeekUnlocked, weeklyModules } from './src/data/curriculum';
 import { isAiReviewConfigured, reviewScamWithAi } from './src/services/aiScamReview';
 import { analyzeCallRisk } from './src/services/callRisk';
 import {
@@ -102,7 +115,23 @@ import {
   TrustedContact,
   WeeklyModule,
 } from './src/types/app';
-import { Btn, Card } from './src/ui/kit';
+import {
+  buildCrossword,
+  crosswordClues,
+  crosswordSize,
+  fillBlankItems,
+  key as cellKey,
+  matchPairs,
+  memoryTerms,
+  redFlagItems,
+  scrambleWords,
+  shuffle,
+  trueFalseItems,
+} from './src/data/games';
+import { requestAllPermissions } from './src/services/permissions';
+import { useFonts } from 'expo-font';
+import { appFonts, Text, TextInput, TextInputInstance } from './src/theme/fonts';
+import { AnimatedBar, AnimatedToggle, Btn, Card, ListRow, Pop, PressableScale, usePressScale } from './src/ui/kit';
 
 LogBox.ignoreLogs(['Cannot connect to Expo CLI']);
 
@@ -124,7 +153,9 @@ type Screen =
   | 'phone'
   | 'voicemail'
   | 'activity'
-  | 'settings';
+  | 'settings'
+  | 'lesson'
+  | 'games';
 
 type ToggleState = Record<string, boolean>;
 
@@ -149,51 +180,56 @@ const screenTitles: Record<Screen, string> = {
   recovery: 'Help After a Scam',
   phone: 'Check a Number',
   voicemail: 'Voicemail',
-  activity: 'Activity',
+  activity: 'Notifications',
   settings: 'Settings',
+  lesson: 'Lesson',
+  games: 'Games',
 };
 
 type ToolAction = { screen: Screen; label: string; detail: string; icon: LucideIcon; tone?: RiskLevel };
 
-const toolGroups: Array<{ title: string; items: ToolAction[] }> = [
+type ToolGroup = { title: string; subtitle: string; icon: LucideIcon; items: ToolAction[] };
+
+const toolGroups: ToolGroup[] = [
   {
-    title: 'Before you reply',
+    title: 'Something you received',
+    subtitle: 'A text, email, or call',
+    icon: MessageCircle,
     items: [
-      { screen: 'scam', label: 'Message or email', detail: 'Paste the words', icon: ShieldCheck },
-      { screen: 'call', label: 'Phone call', detail: 'Answer yes or no', icon: PhoneCall },
-      { screen: 'voicemail', label: 'Voicemail', detail: 'Add notes from the call', icon: FileAudio },
+      { screen: 'scam', label: 'Message or email', detail: 'Paste the words and check them', icon: MessageCircle },
+      { screen: 'call', label: 'Phone call', detail: 'Answer a few yes / no questions', icon: PhoneCall },
+      { screen: 'voicemail', label: 'Voicemail', detail: 'Check what was left on your phone', icon: FileAudio },
     ],
   },
   {
-    title: 'Before you open',
+    title: 'Before you open or tap',
+    subtitle: 'Links, codes, and numbers',
+    icon: LinkIcon,
     items: [
-      { screen: 'link', label: 'Link', detail: 'Check the address', icon: LinkIcon },
-      { screen: 'qr', label: 'QR code', detail: 'Preview the destination', icon: QrCode },
-      { screen: 'phone', label: 'Phone number', detail: 'Check for spoofing', icon: Search },
+      { screen: 'link', label: 'A link', detail: 'Check the address first', icon: LinkIcon },
+      { screen: 'qr', label: 'A QR code', detail: 'Preview where it really goes', icon: QrCode },
+      { screen: 'phone', label: 'A phone number', detail: 'Check for spoofing', icon: Search },
     ],
   },
   {
-    title: 'Money or family',
+    title: 'Money and family',
+    subtitle: 'Payments and urgent calls',
+    icon: CreditCard,
     items: [
-      { screen: 'voice', label: 'Family voice', detail: 'Use your phrase', icon: Mic },
-      { screen: 'payment', label: 'Before you pay', detail: 'Check the payment type', icon: CreditCard },
-      { screen: 'recovery', label: 'Already clicked or paid', detail: 'Start here', icon: LifeBuoy, tone: 'high' },
-    ],
-  },
-  {
-    title: 'Keep learning',
-    items: [
-      { screen: 'practice', label: 'Quiz', detail: 'Practice with examples', icon: Trophy },
-      { screen: 'news', label: 'Scam alerts', detail: 'Current scam patterns', icon: Newspaper },
+      { screen: 'payment', label: 'Before you pay', detail: 'Check how they want to be paid', icon: CreditCard },
+      { screen: 'voice', label: 'A family emergency call', detail: 'Use your family phrase', icon: Mic },
+      { screen: 'recovery', label: 'I already clicked or paid', detail: 'Steps to recover', icon: LifeBuoy, tone: 'high' },
     ],
   },
 ];
 
 const homeQuickChecks: ToolAction[] = [
-  { screen: 'scam', label: 'Message', detail: 'Paste the words', icon: MessageCircle },
-  { screen: 'call', label: 'Phone call', detail: 'Yes / no check', icon: PhoneCall },
+  { screen: 'scam', label: 'Message', detail: 'Text or email', icon: MessageCircle },
+  { screen: 'call', label: 'Call', detail: 'Yes / no check', icon: PhoneCall },
   { screen: 'link', label: 'Link', detail: 'Before you tap', icon: LinkIcon },
   { screen: 'phone', label: 'Number', detail: 'Check spoofing', icon: Search },
+  { screen: 'payment', label: 'Payment', detail: 'Before you pay', icon: CreditCard },
+  { screen: 'tools', label: 'More', detail: 'All checks', icon: LayoutGrid },
 ];
 
 // --- Theme-aware risk color helpers ---------------------------------------
@@ -251,6 +287,10 @@ function normalizePhone(phone: string) {
 // ---------------------------------------------------------------------------
 
 export default function App() {
+  const [fontsLoaded] = useFonts(appFonts);
+  if (!fontsLoaded) {
+    return <View style={{ flex: 1, backgroundColor: '#F4F6F9', alignItems: 'center', justifyContent: 'center' }}><ActivityIndicator size="large" color="#16A34A" /></View>;
+  }
   return (
     <AppProvider>
       <Root />
@@ -289,11 +329,12 @@ function Root() {
 function MainApp() {
   const theme = useTheme();
   const styles = useMemo(() => makeStyles(theme), [theme]);
-  const { profile, prefs, progress, detections, unreadCount, pushDetection, markAllDetectionsRead } = useApp();
+  const { profile, prefs, progress, detections, unreadCount, pushDetection, markAllDetectionsRead, walkthroughSeen, markWalkthroughSeen, recordStreak } = useApp();
 
   const scrollRef = useRef<ScrollView>(null);
   const screenAnim = useRef(new Animated.Value(1)).current;
   const [screen, setScreen] = useState<Screen>('home');
+  const [activeModuleId, setActiveModuleId] = useState<string | null>(null);
   const [contacts, setContacts] = useState<TrustedContact[]>([]);
   const [confidence, setConfidence] = useState<ConfidenceEntry[]>([]);
   const [familyPhrase, setFamilyPhrase] = useState('');
@@ -329,6 +370,10 @@ function MainApp() {
   const [phoneNumber, setPhoneNumber] = useState('');
   const [claimedIdentity, setClaimedIdentity] = useState('');
   const [callRisk, setCallRisk] = useState<CallRiskResult | null>(null);
+  const [notificationsVisible, setNotificationsVisible] = useState(false);
+  const [menuVisible, setMenuVisible] = useState(false);
+  const [aboutVisible, setAboutVisible] = useState(false);
+  const [game, setGame] = useState<'none' | 'scramble' | 'match' | 'crossword' | 'truefalse' | 'fillblank' | 'redflag' | 'memory'>('none');
   const [contactDrafts, setContactDrafts] = useState<TrustedContact[]>([
     { id: 'contact-1', label: 'Trusted Contact 1', name: '', phone: '' },
     { id: 'contact-2', label: 'Trusted Contact 2', name: '', phone: '' },
@@ -417,7 +462,20 @@ function MainApp() {
     if (next === screen) return;
     setScreen(next);
     if (next !== 'qr') setScanning(false);
+    if (next !== 'games') setGame('none');
     if (next === 'activity') markAllDetectionsRead();
+  }
+
+  function openLesson(moduleId: string) {
+    setActiveModuleId(moduleId);
+    setScreen('lesson');
+    scrollRef.current?.scrollTo({ y: 0, animated: false });
+  }
+
+  function startWalkthroughLesson() {
+    markWalkthroughSeen();
+    const first = weeklyModules[0];
+    if (first) openLesson(first.id);
   }
 
   async function refreshAlerts() {
@@ -660,7 +718,8 @@ function MainApp() {
     if (available) {
       await SMS.sendSMSAsync([phone], trustedContactMessage);
     } else {
-      Linking.openURL(`sms:${phone}?body=${encodeURIComponent(trustedContactMessage)}`);
+      const separator = Platform.OS === 'ios' ? '&' : '?';
+      Linking.openURL(`sms:${phone}${separator}body=${encodeURIComponent(trustedContactMessage)}`);
     }
   }
 
@@ -671,6 +730,7 @@ function MainApp() {
     const answered = practiceStats.answered + 1;
     setPracticeStats({ correct, answered });
     setConfidence(await addConfidenceEntry(Math.round((correct / answered) * 100)));
+    recordStreak();
   }
 
   function nextPractice() {
@@ -702,147 +762,198 @@ function MainApp() {
 
 
   function renderHeader() {
+    const bell = (
+      <PressableScale
+        style={styles.headerIconBtn}
+        onPress={() => {
+          setNotificationsVisible(true);
+          markAllDetectionsRead();
+        }}
+        pressedScale={0.9}
+        accessibilityLabel={`Notifications${unreadCount ? `, ${unreadCount} new` : ''}`}
+      >
+        <Bell size={theme.icon(26)} color={theme.colors.ink} strokeWidth={1.9} />
+        {unreadCount ? (
+          <View style={styles.headerBadge}>
+            <Text style={styles.headerBadgeText}>{unreadCount > 9 ? '9+' : unreadCount}</Text>
+          </View>
+        ) : null}
+      </PressableScale>
+    );
+
     if (screen === 'home') {
-      const greeting = profile?.name ? `Hello, ${profile.name}` : 'Shield Our Elders';
+      const greeting = profile?.name ? `Hi, ${profile.name}` : 'Welcome';
       return (
         <View style={styles.header}>
-          <View style={styles.brandRow}>
+          <View style={styles.homeHeaderRow}>
             <View style={styles.logoMark}>
-              <ShieldCheck size={theme.icon(26)} color={theme.colors.onBrand} strokeWidth={2.4} />
+              <ShieldCheck size={theme.icon(28)} color={theme.colors.onBrand} strokeWidth={2} />
             </View>
             <View style={{ flex: 1 }}>
               <Text style={styles.brandName} numberOfLines={1}>
                 {greeting}
               </Text>
-              <Text style={styles.brandTagline}>Your calm second opinion</Text>
+              <Text style={styles.brandTagline} numberOfLines={1}>
+                Shield Our Elders
+              </Text>
             </View>
+            {bell}
+            <PressableScale style={styles.headerIconBtn} onPress={() => setMenuVisible(true)} pressedScale={0.9} accessibilityLabel="Menu and settings">
+              <Menu size={theme.icon(26)} color={theme.colors.ink} strokeWidth={1.9} />
+            </PressableScale>
           </View>
         </View>
       );
     }
+    const backTo: Screen = screen === 'lesson' ? 'learn' : screen === 'practice' ? 'games' : 'home';
+    const backLabel = backTo === 'learn' ? 'Learn' : backTo === 'games' ? 'Games' : 'Home';
     return (
       <View style={styles.header}>
-        <View style={styles.headerNavRow}>
-          <TouchableOpacity style={styles.backButton} onPress={() => navigate('home')} activeOpacity={0.7} accessibilityLabel="Back to home">
-            <ChevronRight size={theme.icon(22)} color={theme.colors.brand} style={styles.backIcon} strokeWidth={2.6} />
-            <Text style={styles.backText}>Home</Text>
-          </TouchableOpacity>
-          <Text style={styles.title}>{screenTitles[screen]}</Text>
+        <View style={styles.headerTopRow}>
+          <View style={{ flex: 1 }}>
+            <TouchableOpacity style={styles.backButton} onPress={() => navigate(backTo)} activeOpacity={0.7} accessibilityLabel={`Back to ${backLabel}`}>
+              <ChevronLeft size={theme.icon(24)} color={theme.colors.brand} strokeWidth={2.4} />
+              <Text style={styles.backText}>{backLabel}</Text>
+            </TouchableOpacity>
+            <Text style={styles.title}>{screenTitles[screen]}</Text>
+          </View>
+          {bell}
         </View>
       </View>
     );
   }
 
   function renderBottomNav() {
-    const items: Array<{ screen: Screen; label: string; icon: LucideIcon; badge?: number }> = [
-      { screen: 'home', label: 'Home', icon: Home },
-      { screen: 'tools', label: 'Checks', icon: LayoutGrid },
-      { screen: 'learn', label: 'Learn', icon: BookOpen },
-      { screen: 'activity', label: 'Alerts', icon: Bell, badge: unreadCount },
-      { screen: 'settings', label: 'Settings', icon: SettingsIcon },
+    const items: Array<{ screen: Screen; label: string; icon: LucideIcon }> = [
+      { screen: 'home', label: 'Home', icon: House },
+      { screen: 'tools', label: 'Checks', icon: ShieldCheck },
+      { screen: 'learn', label: 'Learn', icon: GraduationCap },
+      { screen: 'games', label: 'Games', icon: Puzzle },
+      { screen: 'recovery', label: 'Recover', icon: LifeBuoy },
     ];
+    const activeTab: Screen = screen === 'lesson' ? 'learn' : screen === 'practice' ? 'games' : screen;
     return (
       <View style={styles.bottomNav}>
-        {items.map((item) => {
-          const Icon = item.icon;
-          const active = screen === item.screen;
-          return (
-            <TouchableOpacity key={item.screen} style={styles.navItem} onPress={() => navigate(item.screen)} activeOpacity={0.8} accessibilityRole="button" accessibilityState={{ selected: active }}>
-              <View style={[styles.navIconWrap, active && styles.navIconWrapActive]}>
-                <Icon size={theme.icon(22)} color={active ? theme.colors.brand : theme.colors.muted} strokeWidth={active ? 2.5 : 2.1} />
-                {item.badge ? (
-                  <View style={styles.navBadge}>
-                    <Text style={styles.navBadgeText}>{item.badge > 9 ? '9+' : item.badge}</Text>
-                  </View>
-                ) : null}
-              </View>
-              <Text style={[styles.navLabel, active && styles.navLabelActive]}>{item.label}</Text>
-            </TouchableOpacity>
-          );
-        })}
+        {items.map((item) => (
+          <NavItem key={item.screen} icon={item.icon} label={item.label} active={activeTab === item.screen} onPress={() => navigate(item.screen)} />
+        ))}
       </View>
     );
   }
 
   function renderHome() {
-    const simple = prefs.accessibility.simplifiedLanguage;
-    const recent = detections.slice(0, 2);
+    const modules = weeklyModules;
+    const createdAt = profile?.createdAt ?? new Date().toISOString();
+    const nextLesson =
+      modules.find((m) => isWeekUnlocked(createdAt, m.week) && !progress.completedWeeks.includes(m.id)) ??
+      modules.find((m) => !progress.completedWeeks.includes(m.id)) ??
+      modules[modules.length - 1];
+    const nextUnlocked = nextLesson ? isWeekUnlocked(createdAt, nextLesson.week) : false;
+
     return (
-      <View style={styles.stack}>
-        <View style={styles.homeHero}>
-          <Text style={styles.homeHeroTitle}>{simple ? 'Not sure? Check it.' : 'Not sure about it?\nLet’s check together.'}</Text>
-          <Text style={styles.homeHeroText}>
-            {simple ? 'Stop and check before you reply, pay, or tap a link.' : 'Slow down and take one clear step before you reply, pay, or tap a link.'}
-          </Text>
-        </View>
-
-        <TouchableOpacity
-          style={styles.emergencyButton}
-          activeOpacity={0.9}
-          onPress={() => {
-            setEmergencyVisible(true);
-            navigate('emergency');
-          }}
-          accessibilityRole="button"
-          accessibilityLabel="I think this is a scam. Show safety steps."
-        >
-          <View style={styles.emergencyIcon}>
-            <Siren size={theme.icon(30)} color={theme.colors.onBrand} strokeWidth={2.6} />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.emergencyTitle}>I think this is a scam</Text>
-            <Text style={styles.emergencySub}>Show me the safety steps</Text>
-          </View>
-          <ChevronRight size={theme.icon(26)} color={theme.colors.onBrand} strokeWidth={2.4} />
-        </TouchableOpacity>
-
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>Quick checks</Text>
-          <TouchableOpacity style={styles.textLinkButton} onPress={() => navigate('tools')} accessibilityRole="button">
-            <Text style={styles.inlineLink}>See all</Text>
-            <ChevronRight size={theme.icon(18)} color={theme.colors.brand} strokeWidth={2.6} />
-          </TouchableOpacity>
-        </View>
-        <View style={styles.tileGrid}>
-          {homeQuickChecks.map((tool) => (
-            <GridTile key={tool.screen} {...tool} onPress={() => navigate(tool.screen)} />
-          ))}
-        </View>
-
-        {recent.length ? (
-          <View style={{ gap: theme.space.sm }}>
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Recent activity</Text>
-              <TouchableOpacity style={styles.textLinkButton} onPress={() => navigate('activity')} accessibilityRole="button">
-                <Text style={styles.inlineLink}>View all</Text>
-                <ChevronRight size={theme.icon(18)} color={theme.colors.brand} strokeWidth={2.6} />
-              </TouchableOpacity>
+      <View style={styles.homeStack}>
+        {/* Big, clear help button — the most important action */}
+        <Reveal delay={0}>
+          <TouchableOpacity
+            style={styles.emergencyButton}
+            activeOpacity={0.9}
+            onPress={() => {
+              setEmergencyVisible(true);
+              navigate('emergency');
+            }}
+            accessibilityRole="button"
+            accessibilityLabel="I think this is a scam. Show safety steps."
+          >
+            <View style={styles.emergencyIcon}>
+              <Siren size={theme.icon(34)} color={theme.colors.onBrand} strokeWidth={2.6} />
             </View>
-            {recent.map((event) => (
-              <ActivityRow key={event.id} event={event} />
-            ))}
-          </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.emergencyTitle}>I think this is a scam</Text>
+              <Text style={styles.emergencySub}>Tap for safety steps</Text>
+            </View>
+            <ChevronRight size={theme.icon(28)} color={theme.colors.onBrand} strokeWidth={2.6} />
+          </TouchableOpacity>
+        </Reveal>
+
+        {/* Streak chip — encourages weekly play */}
+        {progress.streak > 0 ? (
+          <Reveal delay={60}>
+            <TouchableOpacity style={styles.homeStreakChip} onPress={() => navigate('games')} activeOpacity={0.85} accessibilityRole="button">
+              <View style={styles.homeStreakIcon}>
+                <Flame size={theme.icon(22)} color={theme.colors.onBrand} strokeWidth={2} />
+              </View>
+              <Text style={styles.homeStreakText}>{progress.streak}-week streak — keep it going!</Text>
+              <ChevronRight size={theme.icon(20)} color={theme.colors.brand} strokeWidth={2.2} />
+            </TouchableOpacity>
+          </Reveal>
         ) : null}
 
-        <TrustedContactStrip contacts={contacts} onCall={callContact} onText={textContact} onManage={() => navigate('contacts')} />
+        {/* Check something — big icon-first tiles */}
+        <Reveal delay={120}>
+          <Text style={styles.homeSectionTitle}>Check something</Text>
+          <View style={[styles.homeGrid, { marginTop: theme.space.md }]}>
+            {homeQuickChecks.map((tool) => (
+              <HomeTile key={tool.screen} {...tool} onPress={() => navigate(tool.screen)} />
+            ))}
+          </View>
+        </Reveal>
+
+        {/* Today's lesson */}
+        {nextLesson ? (
+          <Reveal delay={180}>
+            <Text style={[styles.homeSectionTitle, { marginBottom: theme.space.md }]}>Today’s lesson</Text>
+            <TouchableOpacity
+              style={styles.lessonCta}
+              activeOpacity={0.9}
+              disabled={!nextUnlocked}
+              onPress={() => openLesson(nextLesson.id)}
+              accessibilityRole="button"
+            >
+              <View style={styles.lessonCtaIcon}>
+                <GraduationCap size={theme.icon(30)} color={theme.colors.onBrand} strokeWidth={2.3} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.lessonCtaEyebrow}>Week {nextLesson.week} · {nextLesson.minutes} min</Text>
+                <Text style={styles.lessonCtaTitle}>{nextLesson.title}</Text>
+              </View>
+              <ChevronRight size={theme.icon(26)} color={theme.colors.onBrand} strokeWidth={2.5} />
+            </TouchableOpacity>
+          </Reveal>
+        ) : null}
+
+        {/* Trusted contact */}
+        <Reveal delay={240}>
+          <TrustedContactStrip contacts={contacts} onCall={callContact} onText={textContact} onManage={() => navigate('contacts')} />
+        </Reveal>
       </View>
     );
   }
 
   function renderTools() {
     return (
-      <View style={styles.stack}>
-        <Text style={styles.screenIntro}>Pick the check that matches what just happened.</Text>
-        {toolGroups.map((group) => (
-          <View key={group.title} style={styles.toolSection}>
-            <Text style={styles.toolSectionTitle}>{group.title}</Text>
-            <View style={styles.tileGrid}>
-              {group.items.map((tool) => (
-                <GridTile key={tool.screen} {...tool} onPress={() => navigate(tool.screen)} />
-              ))}
-            </View>
-          </View>
-        ))}
+      <View style={styles.checksStack}>
+        <Text style={styles.screenIntro}>What would you like to check?</Text>
+        {toolGroups.map((group, gi) => {
+          const GroupIcon = group.icon;
+          return (
+            <Reveal key={group.title} delay={gi * 90} style={styles.checkGroup}>
+              <View style={styles.checkGroupHeader}>
+                <View style={styles.checkGroupIcon}>
+                  <GroupIcon size={theme.icon(22)} color={theme.colors.brand} strokeWidth={2.4} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.checkGroupTitle}>{group.title}</Text>
+                  <Text style={styles.checkGroupSubtitle}>{group.subtitle}</Text>
+                </View>
+              </View>
+              <View style={styles.checkGroupBody}>
+                {group.items.map((tool, index) => (
+                  <ToolRow key={tool.screen} {...tool} last={index === group.items.length - 1} onPress={() => navigate(tool.screen)} />
+                ))}
+              </View>
+            </Reveal>
+          );
+        })}
       </View>
     );
   }
@@ -973,23 +1084,49 @@ function MainApp() {
   }
 
   function renderEmergency() {
+    const dontDo: Array<{ icon: LucideIcon; text: string }> = [
+      { icon: PhoneOff, text: 'Hang up now. You do not have to stay on the call.' },
+      { icon: Ban, text: 'Do not send money, gift cards, or crypto.' },
+      { icon: LinkIcon, text: 'Do not click any links they sent you.' },
+      { icon: KeyRound, text: 'Do not share codes, passwords, or bank details.' },
+      { icon: MonitorOff, text: 'Do not install anything or allow remote access.' },
+    ];
     return (
       <View style={styles.stack}>
-        <View style={styles.stopPanel}>
-          <Siren size={theme.icon(42)} color={theme.colors.danger} strokeWidth={2.8} />
-          <Text style={styles.stopTitle}>Stop. You have time.</Text>
-          <Text style={styles.stopText}>A real bank, agency, or family member can wait.</Text>
-        </View>
-        {emergencySteps.map((step, index) => (
-          <View key={step} style={styles.stepRow}>
-            <View style={styles.stepNumber}>
-              <Text style={styles.stepNumberText}>{index + 1}</Text>
+        <Pop style={styles.emergencyHero}>
+          <BurstIcon>
+            <View style={styles.emergencyHeroIcon}>
+              <Siren size={theme.icon(42)} color={theme.colors.onBrand} strokeWidth={2} />
             </View>
-            <Text style={styles.stepText}>{step}</Text>
-          </View>
-        ))}
+          </BurstIcon>
+          <Text style={styles.emergencyHeroTitle}>Stop. You have time.</Text>
+          <Text style={styles.emergencyHeroText}>A real bank, agency, or family member can always wait. Take a slow breath.</Text>
+        </Pop>
+
+        <Text style={styles.emergencySectionTitle}>Right now, do NOT</Text>
+        <View style={styles.dontList}>
+          {dontDo.map((item, index) => {
+            const Icon = item.icon;
+            return (
+              <Reveal key={item.text} delay={100 + index * 80} style={[styles.dontRow, index < dontDo.length - 1 && styles.dontRowDivider]}>
+                <View style={styles.dontIcon}>
+                  <Icon size={theme.icon(24)} color={theme.colors.danger} strokeWidth={2} />
+                </View>
+                <Text style={styles.dontText}>{item.text}</Text>
+              </Reveal>
+            );
+          })}
+        </View>
+
+        <Text style={styles.emergencySectionTitle}>Then get help</Text>
         <TrustedContactStrip contacts={contacts} onCall={callContact} onText={textContact} urgent />
-        <Btn label="Report fraud at ReportFraud.ftc.gov" icon={ExternalLink} onPress={() => Linking.openURL('https://reportfraud.ftc.gov/')} />
+        <View style={styles.emergencyInfo}>
+          <Phone size={theme.icon(22)} color={theme.colors.brand} strokeWidth={2} />
+          <Text style={styles.emergencyInfoText}>
+            Call the official number printed on your card or statement — never a number the caller gave you.
+          </Text>
+        </View>
+        <Btn label="Report fraud to the FTC" icon={ExternalLink} onPress={() => Linking.openURL('https://reportfraud.ftc.gov/')} />
       </View>
     );
   }
@@ -999,7 +1136,8 @@ function MainApp() {
       <View style={styles.stack}>
         <Text style={styles.screenIntro}>Save up to two people you trust, so help is always one tap away.</Text>
         {contactDrafts.map((contact, index) => (
-          <Card key={contact.id}>
+          <Reveal key={contact.id} delay={index * 90}>
+          <Card>
             <Text style={styles.cardTitle}>{contact.label}</Text>
             <TextInput
               style={styles.input}
@@ -1022,13 +1160,16 @@ function MainApp() {
               <SecondaryAction icon={MessageCircle} label="Text" onPress={() => textContact(contact)} disabled={!contact.phone.trim()} />
             </View>
           </Card>
+          </Reveal>
         ))}
+        <Reveal delay={180}>
         <Card>
           <Text style={styles.cardTitle}>Family verification phrase</Text>
           <Text style={styles.cardBody}>Agree on a private phrase with your family. Ask for it during any emergency call to confirm it is really them.</Text>
           <TextInput style={styles.input} value={familyPhrase} onChangeText={setFamilyPhrase} placeholder="Example: blue porch light" placeholderTextColor={theme.colors.faint} />
           <Btn label="Save phrase" icon={ShieldCheck} onPress={savePhrase} />
         </Card>
+        </Reveal>
       </View>
     );
   }
@@ -1049,10 +1190,10 @@ function MainApp() {
         />
         {hasUrlInput ? <RiskPanel result={linkResult} /> : null}
         <SecondaryAction icon={X} label="Clear" onPress={() => setUrlText('')} disabled={!hasUrlInput} />
-        <TouchableOpacity style={[styles.secondaryButtonWide, !hasUrlInput && styles.disabledButton]} onPress={() => openUrl(urlText)} disabled={!hasUrlInput}>
+        <PressableScale style={[styles.secondaryButtonWide, !hasUrlInput && styles.disabledButton]} onPress={() => openUrl(urlText)} disabled={!hasUrlInput} accessibilityLabel="Open link only if you expected it">
           <ExternalLink size={theme.icon(20)} color={hasUrlInput ? theme.colors.brand : theme.colors.faint} />
           <Text style={[styles.secondaryButtonWideText, !hasUrlInput && styles.disabledText]}>Open only if you expected it</Text>
-        </TouchableOpacity>
+        </PressableScale>
       </View>
     );
   }
@@ -1084,10 +1225,10 @@ function MainApp() {
         />
         {hasQrInput ? <RiskPanel result={qrResult} /> : null}
         <SecondaryAction icon={X} label="Clear" onPress={() => setQrValue('')} disabled={!hasQrInput} />
-        <TouchableOpacity style={[styles.secondaryButtonWide, !hasQrInput && styles.disabledButton]} onPress={() => openUrl(qrValue)} disabled={!hasQrInput}>
+        <PressableScale style={[styles.secondaryButtonWide, !hasQrInput && styles.disabledButton]} onPress={() => openUrl(qrValue)} disabled={!hasQrInput} accessibilityLabel="Open only if verified">
           <ExternalLink size={theme.icon(20)} color={hasQrInput ? theme.colors.brand : theme.colors.faint} />
           <Text style={[styles.secondaryButtonWideText, !hasQrInput && styles.disabledText]}>Open only if verified</Text>
-        </TouchableOpacity>
+        </PressableScale>
       </View>
     );
   }
@@ -1138,20 +1279,22 @@ function MainApp() {
       <View style={styles.stack}>
         <View style={styles.sectionHeader}>
           <Text style={styles.screenIntroNarrow}>Current warnings from public safety sources.</Text>
-          <TouchableOpacity style={styles.refreshButton} onPress={refreshAlerts} accessibilityRole="button">
+          <PressableScale style={styles.refreshButton} onPress={refreshAlerts} pressedScale={0.94} accessibilityLabel="Refresh alerts">
             <Newspaper size={theme.icon(18)} color={theme.colors.brand} />
             <Text style={styles.refreshText}>Refresh</Text>
-          </TouchableOpacity>
+          </PressableScale>
         </View>
-        {alerts.map((alert) => (
-          <TouchableOpacity key={alert.id} style={styles.newsItem} onPress={() => Linking.openURL(alert.url)} activeOpacity={0.75}>
-            <View style={styles.newsTop}>
-              <Text style={styles.newsSource}>{alert.source}</Text>
-              <Text style={styles.newsDate}>{formatDate(alert.date)}</Text>
-            </View>
-            <Text style={styles.newsTitle}>{alert.title}</Text>
-            <Text style={styles.cardBody}>{alert.summary}</Text>
-          </TouchableOpacity>
+        {alerts.map((alert, i) => (
+          <Reveal key={alert.id} delay={i * 70}>
+            <PressableScale style={styles.newsItem} onPress={() => Linking.openURL(alert.url)} pressedScale={0.98} accessibilityLabel={alert.title}>
+              <View style={styles.newsTop}>
+                <Text style={styles.newsSource}>{alert.source}</Text>
+                <Text style={styles.newsDate}>{formatDate(alert.date)}</Text>
+              </View>
+              <Text style={styles.newsTitle}>{alert.title}</Text>
+              <Text style={styles.cardBody}>{alert.summary}</Text>
+            </PressableScale>
+          </Reveal>
         ))}
       </View>
     );
@@ -1159,28 +1302,44 @@ function MainApp() {
 
 
   function renderLearn() {
-    const modules = modulesForDifficulty(prefs.difficulty);
+    const modules = weeklyModules;
+    const createdAt = profile?.createdAt ?? new Date().toISOString();
     const done = progress.completedWeeks.filter((id) => modules.some((m) => m.id === id)).length;
     const pct = modules.length ? Math.round((done / modules.length) * 100) : 0;
     return (
-      <View style={styles.stack}>
-        <View style={styles.confidencePanel}>
-          <View style={styles.metricTopRow}>
-            <Text style={styles.metricLabel}>Your learning journey</Text>
-            <Text style={styles.metricSmall}>
-              {done} of {modules.length} weeks
-            </Text>
+      <View style={styles.learnStack}>
+        <Reveal>
+          <View style={styles.confidencePanel}>
+            <View style={styles.metricTopRow}>
+              <Text style={styles.metricLabel}>Your learning journey</Text>
+              <Text style={styles.metricSmall}>
+                {done} of {modules.length} done
+              </Text>
+            </View>
+            <Text style={styles.metricValue}>{pct}%</Text>
+            <ProgressBar value={pct === 0 ? 2 : pct} />
           </View>
-          <Text style={styles.metricValue}>{pct}%</Text>
-          <ProgressBar value={pct === 0 ? 2 : pct} />
-        </View>
-        <Text style={styles.screenIntro}>One short lesson each week: read it, see a real example, then try the quick question.</Text>
-        {modules.map((module) => (
-          <WeekCard key={module.id} module={module} />
+        </Reveal>
+        <Text style={styles.screenIntro}>A new lesson opens each week. Tap one to read it and take the quiz.</Text>
+        {modules.map((module, i) => (
+          <Reveal key={module.id} delay={Math.min(i, 6) * 55}>
+            <WeekRow
+              module={module}
+              createdAt={createdAt}
+              completed={progress.completedWeeks.includes(module.id)}
+              onOpen={() => openLesson(module.id)}
+            />
+          </Reveal>
         ))}
         <Btn label="Extra practice quiz" icon={Trophy} variant="secondary" onPress={() => navigate('practice')} />
       </View>
     );
+  }
+
+  function renderLesson() {
+    const module = weeklyModules.find((m) => m.id === activeModuleId);
+    if (!module) return renderLearn();
+    return <LessonScreen module={module} onBack={() => navigate('learn')} />;
   }
 
   function renderPractice() {
@@ -1208,12 +1367,12 @@ function MainApp() {
             const isCorrect = answered && practice.answer === option;
             const isWrong = answered && isSelected && practice.answer !== option;
             return (
-              <TouchableOpacity
+              <PressableScale
                 key={option}
                 style={[styles.answerButton, isSelected && styles.answerSelected, isCorrect && styles.answerCorrect, isWrong && styles.answerWrong]}
                 onPress={() => choosePractice(option)}
-                activeOpacity={0.78}
                 disabled={answered}
+                accessibilityLabel={option === 'safe' ? 'Safe' : option === 'suspicious' ? 'Not sure' : 'Scam'}
               >
                 {isCorrect ? (
                   <CheckCircle2 size={theme.icon(22)} color={theme.colors.low} />
@@ -1223,12 +1382,12 @@ function MainApp() {
                   <Circle size={theme.icon(22)} color={isSelected ? theme.colors.info : theme.colors.muted} />
                 )}
                 <Text style={styles.answerText}>{option === 'safe' ? 'Safe' : option === 'suspicious' ? 'Not sure' : 'Scam'}</Text>
-              </TouchableOpacity>
+              </PressableScale>
             );
           })}
         </View>
         {answered ? (
-          <View style={styles.feedbackPanel}>
+          <Pop style={styles.feedbackPanel}>
             <Text style={[styles.feedbackTitle, selectedPractice !== practice.answer && styles.feedbackWrong]}>
               {selectedPractice === practice.answer ? 'Correct' : `Answer: ${practice.answer === 'suspicious' ? 'not sure' : practice.answer}`}
             </Text>
@@ -1241,7 +1400,7 @@ function MainApp() {
             ))}
             <Btn label="Next example" icon={ChevronRight} onPress={nextPractice} />
             <SecondaryAction icon={X} label="Restart quiz" onPress={restartPractice} />
-          </View>
+          </Pop>
         ) : null}
       </View>
     );
@@ -1251,16 +1410,18 @@ function MainApp() {
     return (
       <View style={styles.stack}>
         <Text style={styles.screenIntro}>If anything was shared or paid, act quickly. Start here.</Text>
-        {recoverySteps.map((group) => (
-          <Card key={group.title}>
-            <Text style={styles.cardTitle}>{group.title}</Text>
-            {group.items.map((item) => (
-              <View key={item} style={styles.bulletRow}>
-                <CheckCircle2 size={theme.icon(19)} color={theme.colors.brand} />
-                <Text style={styles.bulletText}>{item}</Text>
-              </View>
-            ))}
-          </Card>
+        {recoverySteps.map((group, gi) => (
+          <Reveal key={group.title} delay={gi * 90}>
+            <Card>
+              <Text style={styles.cardTitle}>{group.title}</Text>
+              {group.items.map((item) => (
+                <View key={item} style={styles.bulletRow}>
+                  <CheckCircle2 size={theme.icon(19)} color={theme.colors.brand} />
+                  <Text style={styles.bulletText}>{item}</Text>
+                </View>
+              ))}
+            </Card>
+          </Reveal>
         ))}
         <Btn label="Report fraud to the FTC" icon={ExternalLink} onPress={() => Linking.openURL('https://reportfraud.ftc.gov/')} />
         <Btn label="Report internet fraud to IC3" icon={ExternalLink} variant="secondary" onPress={() => Linking.openURL('https://www.ic3.gov/')} />
@@ -1292,10 +1453,10 @@ function MainApp() {
         />
         <Btn label="Check this number" icon={ShieldCheck} onPress={runCallRiskCheck} disabled={!hasPhoneInput} />
         {callRisk ? <CallRiskPanel result={callRisk} /> : null}
-        <TouchableOpacity style={[styles.secondaryButtonWide, !hasPhoneInput && styles.disabledButton]} onPress={openSearchForPhone} disabled={!hasPhoneInput}>
+        <PressableScale style={[styles.secondaryButtonWide, !hasPhoneInput && styles.disabledButton]} onPress={openSearchForPhone} disabled={!hasPhoneInput} accessibilityLabel="Search community scam reports">
           <Search size={theme.icon(20)} color={hasPhoneInput ? theme.colors.brand : theme.colors.faint} />
           <Text style={[styles.secondaryButtonWideText, !hasPhoneInput && styles.disabledText]}>Search community scam reports</Text>
-        </TouchableOpacity>
+        </PressableScale>
       </View>
     );
   }
@@ -1359,8 +1520,8 @@ function MainApp() {
           <View style={styles.emptyIcon}>
             <Bell size={theme.icon(34)} color={theme.colors.brand} strokeWidth={2.2} />
           </View>
-          <Text style={styles.cardTitle}>No alerts yet</Text>
-          <Text style={[styles.cardBody, { textAlign: 'center' }]}>When a check finds a possible scam call, message, or link, it will appear here so you can review it any time.</Text>
+          <Text style={styles.cardTitle}>No notifications yet</Text>
+          <Text style={[styles.cardBody, { textAlign: 'center' }]}>When a check finds a possible scam call, message, or link, a notification appears here and on your phone.</Text>
         </View>
       );
     }
@@ -1370,6 +1531,41 @@ function MainApp() {
         {detections.map((event) => (
           <ActivityRow key={event.id} event={event} detailed />
         ))}
+      </View>
+    );
+  }
+
+  function renderGames() {
+    const back = () => setGame('none');
+    if (game === 'scramble') return <ScrambleGame onBack={back} onWin={recordStreak} />;
+    if (game === 'match') return <MatchGame onBack={back} onWin={recordStreak} />;
+    if (game === 'crossword') return <CrosswordGame onBack={back} onWin={recordStreak} />;
+    if (game === 'truefalse') return <TrueFalseGame onBack={back} onWin={recordStreak} />;
+    if (game === 'fillblank') return <FillBlankGame onBack={back} onWin={recordStreak} />;
+    if (game === 'redflag') return <RedFlagGame onBack={back} onWin={recordStreak} />;
+    if (game === 'memory') return <MemoryGame onBack={back} onWin={recordStreak} />;
+
+    const tiles: Array<{ icon: LucideIcon; title: string; onPress: () => void; tone: number }> = [
+      { icon: Trophy, title: 'Spot the Scam', onPress: () => navigate('practice'), tone: 0 },
+      { icon: Grid3x3, title: 'Crossword', onPress: () => setGame('crossword'), tone: 1 },
+      { icon: Shuffle, title: 'Word Scramble', onPress: () => setGame('scramble'), tone: 2 },
+      { icon: Puzzle, title: 'Match the Term', onPress: () => setGame('match'), tone: 3 },
+      { icon: ToggleLeft, title: 'True or False', onPress: () => setGame('truefalse'), tone: 0 },
+      { icon: PenLine, title: 'Fill the Blank', onPress: () => setGame('fillblank'), tone: 1 },
+      { icon: Flag, title: 'Red Flag Rush', onPress: () => setGame('redflag'), tone: 2 },
+      { icon: Brain, title: 'Memory Match', onPress: () => setGame('memory'), tone: 3 },
+    ];
+    return (
+      <View style={styles.stack}>
+        <StreakBanner streak={progress.streak} best={progress.bestStreak} />
+        <Text style={styles.screenIntro}>Play a quick game to keep sharp. Play any week to grow your streak — no timer, no pressure.</Text>
+        <View style={styles.tileGrid}>
+          {tiles.map((tile, i) => (
+            <Reveal key={tile.title} delay={i * 55} style={styles.gameTileWrap}>
+              <GameTile icon={tile.icon} title={tile.title} tone={tile.tone} onPress={tile.onPress} />
+            </Reveal>
+          ))}
+        </View>
       </View>
     );
   }
@@ -1398,6 +1594,8 @@ function MainApp() {
         return renderNews();
       case 'learn':
         return renderLearn();
+      case 'lesson':
+        return renderLesson();
       case 'practice':
         return renderPractice();
       case 'recovery':
@@ -1406,8 +1604,8 @@ function MainApp() {
         return renderPhoneLookup();
       case 'voicemail':
         return renderVoicemail();
-      case 'activity':
-        return renderActivity();
+      case 'games':
+        return renderGames();
       case 'settings':
         return <Settings />;
       default:
@@ -1424,8 +1622,11 @@ function MainApp() {
           style={[
             styles.screenTransition,
             {
-              opacity: screenAnim,
-              transform: [{ translateY: screenAnim.interpolate({ inputRange: [0, 1], outputRange: [18, 0] }) }],
+              opacity: screenAnim.interpolate({ inputRange: [0, 1], outputRange: [0, 1], extrapolate: 'clamp' }),
+              transform: [
+                { translateY: screenAnim.interpolate({ inputRange: [0, 1], outputRange: [22, 0] }) },
+                { scale: screenAnim.interpolate({ inputRange: [0, 1], outputRange: [0.985, 1] }) },
+              ],
             },
           ]}
         >
@@ -1444,6 +1645,86 @@ function MainApp() {
           <ScrollView contentContainerStyle={styles.modalContent}>{renderEmergency()}</ScrollView>
         </View>
       </Modal>
+      <Modal visible={!walkthroughSeen} animationType="fade" onRequestClose={markWalkthroughSeen}>
+        <Walkthrough
+          onSkip={markWalkthroughSeen}
+          onLesson={startWalkthroughLesson}
+          onQuickCheck={() => {
+            markWalkthroughSeen();
+            navigate('scam');
+          }}
+        />
+      </Modal>
+
+      {/* Notifications (opened by the bell on every page) */}
+      <Modal visible={notificationsVisible} animationType="slide" onRequestClose={() => setNotificationsVisible(false)}>
+        <View style={styles.modalScreen}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>Notifications</Text>
+            <Pressable style={styles.closeButton} onPress={() => setNotificationsVisible(false)} accessibilityLabel="Close">
+              <X size={theme.icon(24)} color={theme.colors.ink} />
+            </Pressable>
+          </View>
+          <ScrollView contentContainerStyle={styles.modalContent}>{renderActivity()}</ScrollView>
+        </View>
+      </Modal>
+
+      {/* Menu / options (hamburger on home) — slides in from the side */}
+      <SideDrawer visible={menuVisible} onClose={() => setMenuVisible(false)}>
+        <View style={styles.drawerHeader}>
+          <View style={styles.drawerLogo}>
+            <ShieldCheck size={theme.icon(24)} color={theme.colors.onBrand} strokeWidth={2} />
+          </View>
+          <Text style={styles.drawerTitle}>Menu</Text>
+          <Pressable style={styles.closeButton} onPress={() => setMenuVisible(false)} accessibilityLabel="Close menu">
+            <X size={theme.icon(22)} color={theme.colors.ink} />
+          </Pressable>
+        </View>
+        <ScrollView contentContainerStyle={{ padding: theme.space.lg, gap: theme.space.xs }}>
+          <ListRow icon={SettingsIcon} label="Settings" onPress={() => { setMenuVisible(false); navigate('settings'); }} />
+          <ListRow icon={Bell} label="Notifications" onPress={() => { setMenuVisible(false); setNotificationsVisible(true); markAllDetectionsRead(); }} />
+          <ListRow icon={Users} label="Trusted contacts" onPress={() => { setMenuVisible(false); navigate('contacts'); }} />
+          <ListRow icon={Puzzle} label="Games" onPress={() => { setMenuVisible(false); navigate('games'); }} />
+          <ListRow icon={KeyRound} label="App permissions" onPress={() => requestAllPermissions()} />
+          <ListRow icon={Info} label="About Shield Our Elders" onPress={() => { setMenuVisible(false); setAboutVisible(true); }} last />
+        </ScrollView>
+      </SideDrawer>
+
+      {/* About Us */}
+      <Modal visible={aboutVisible} animationType="slide" onRequestClose={() => setAboutVisible(false)}>
+        <View style={styles.modalScreen}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>About Us</Text>
+            <Pressable style={styles.closeButton} onPress={() => setAboutVisible(false)} accessibilityLabel="Close">
+              <X size={theme.icon(24)} color={theme.colors.ink} />
+            </Pressable>
+          </View>
+          <ScrollView contentContainerStyle={styles.modalContent}>
+            <View style={styles.aboutHeroWrap}>
+              <View style={styles.aboutLogo}>
+                <ShieldCheck size={theme.icon(46)} color={theme.colors.onBrand} strokeWidth={2} />
+              </View>
+              <Text style={styles.aboutTitle}>Shield Our Elders</Text>
+              <Text style={styles.aboutTagline}>Senior-friendly scam defense</Text>
+            </View>
+            <Text style={styles.cardBody}>
+              Scams work by creating pressure. Our mission is simple: help older adults slow down, check whether a call, message, link, or payment is safe, and take a calm next step — without needing to be a technology expert.
+            </Text>
+            <Text style={styles.cardBody}>
+              Everything stays private on your device. We built this for seniors living independently and for the families and caregivers who help protect the people they love.
+            </Text>
+            <Card>
+              <Text style={styles.cardTitle}>What we believe</Text>
+              <View style={styles.bulletRow}><CheckCircle2 size={theme.icon(19)} color={theme.colors.brand} /><Text style={styles.bulletText}>You always have time to check.</Text></View>
+              <View style={styles.bulletRow}><CheckCircle2 size={theme.icon(19)} color={theme.colors.brand} /><Text style={styles.bulletText}>Clear, plain language beats jargon.</Text></View>
+              <View style={styles.bulletRow}><CheckCircle2 size={theme.icon(19)} color={theme.colors.brand} /><Text style={styles.bulletText}>Your privacy is part of your safety.</Text></View>
+            </Card>
+            <Text style={styles.smallMuted}>
+              Shield Our Elders offers scam-safety guidance only. It does not replace your bank, the police, lawyers, or emergency services. For immediate danger, call your local emergency number.
+            </Text>
+          </ScrollView>
+        </View>
+      </Modal>
     </KeyboardAvoidingView>
   );
 }
@@ -1453,7 +1734,7 @@ function MainApp() {
 // Presentational components (theme-aware)
 // ---------------------------------------------------------------------------
 
-function GridTile({ label, detail, icon: Icon, onPress, tone }: { label: string; detail: string; icon: LucideIcon; onPress: () => void; tone?: RiskLevel }) {
+function HomeTile({ label, detail, icon: Icon, onPress, tone }: { label: string; detail: string; icon: LucideIcon; onPress: () => void; tone?: RiskLevel }) {
   const theme = useTheme();
   const styles = useMemo(() => makeStyles(theme), [theme]);
   const scale = useRef(new Animated.Value(1)).current;
@@ -1463,15 +1744,38 @@ function GridTile({ label, detail, icon: Icon, onPress, tone }: { label: string;
     Animated.spring(scale, { toValue: to, useNativeDriver: true, speed: 40, bounciness: 5 }).start();
   };
   return (
-    <Animated.View style={[styles.tileWrap, { transform: [{ scale }] }]}>
-      <Pressable style={styles.tile} onPress={onPress} onPressIn={() => press(0.96)} onPressOut={() => press(1)} accessibilityRole="button" accessibilityLabel={`${label}. ${detail}`}>
-        <View style={[styles.tileIcon, { backgroundColor: tone ? levelBg(theme, tone) : theme.colors.brandTint }]}>
-          <Icon size={theme.icon(28)} color={color} strokeWidth={2.4} />
+    <Animated.View style={[styles.homeTileWrap, { transform: [{ scale }] }]}>
+      <Pressable style={styles.homeTile} onPress={onPress} onPressIn={() => press(0.96)} onPressOut={() => press(1)} accessibilityRole="button" accessibilityLabel={`${label}. ${detail}`}>
+        <View style={[styles.homeTileIcon, { backgroundColor: tone ? levelBg(theme, tone) : theme.colors.brandTint }]}>
+          <Icon size={theme.icon(32)} color={color} strokeWidth={2.3} />
         </View>
-        <Text style={styles.tileTitle}>{label}</Text>
-        <Text style={styles.tileDetail}>{detail}</Text>
+        <Text style={styles.homeTileTitle}>{label}</Text>
+        <Text style={styles.homeTileDetail}>{detail}</Text>
       </Pressable>
     </Animated.View>
+  );
+}
+
+function ToolRow({ label, detail, icon: Icon, onPress, tone, last }: { label: string; detail: string; icon: LucideIcon; onPress: () => void; tone?: RiskLevel; last?: boolean }) {
+  const theme = useTheme();
+  const styles = useMemo(() => makeStyles(theme), [theme]);
+  const color = tone ? levelColor(theme, tone) : theme.colors.brand;
+  return (
+    <PressableScale
+      style={[styles.toolRow, !last && styles.toolRowDivider]}
+      onPress={onPress}
+      pressedScale={0.98}
+      accessibilityLabel={`${label}. ${detail}`}
+    >
+      <View style={[styles.toolRowIcon, { backgroundColor: tone ? levelBg(theme, tone) : theme.colors.brandTint }]}>
+        <Icon size={theme.icon(26)} color={color} strokeWidth={2.4} />
+      </View>
+      <View style={{ flex: 1 }}>
+        <Text style={styles.toolRowTitle}>{label}</Text>
+        <Text style={styles.toolRowDetail}>{detail}</Text>
+      </View>
+      <ChevronRight size={theme.icon(24)} color={theme.colors.faint} strokeWidth={2.4} />
+    </PressableScale>
   );
 }
 
@@ -1491,7 +1795,7 @@ function SpamModelPanel({ review }: { review: HfSpamReview }) {
   const styles = useMemo(() => makeStyles(theme), [theme]);
   const color = levelColor(theme, review.level);
   return (
-    <View style={[styles.riskPanel, { backgroundColor: levelBg(theme, review.level), borderColor: color }]}>
+    <Pop style={[styles.riskPanel, { backgroundColor: levelBg(theme, review.level), borderColor: color }]}>
       <View style={styles.riskTop}>
         <View style={styles.riskTextColumn}>
           <Text style={[styles.riskLabel, { color }]}>SMS spam check</Text>
@@ -1516,7 +1820,7 @@ function SpamModelPanel({ review }: { review: HfSpamReview }) {
           <Text style={styles.bulletText}>{step}</Text>
         </View>
       ))}
-    </View>
+    </Pop>
   );
 }
 
@@ -1525,7 +1829,7 @@ function AiReviewPanel({ review }: { review: AiScamReview }) {
   const styles = useMemo(() => makeStyles(theme), [theme]);
   const color = levelColor(theme, review.level);
   return (
-    <View style={[styles.riskPanel, { backgroundColor: levelBg(theme, review.level), borderColor: color }]}>
+    <Pop style={[styles.riskPanel, { backgroundColor: levelBg(theme, review.level), borderColor: color }]}>
       <View style={styles.riskTop}>
         <View style={styles.riskTextColumn}>
           <Text style={[styles.riskLabel, { color }]}>AI review</Text>
@@ -1556,7 +1860,7 @@ function AiReviewPanel({ review }: { review: AiScamReview }) {
           <Text style={styles.bulletText}>{step}</Text>
         </View>
       ))}
-    </View>
+    </Pop>
   );
 }
 
@@ -1568,7 +1872,7 @@ function RiskPanel({ result }: { result: AnalysisResult }) {
   const visibleFindings = [...result.findings].sort((left, right) => right.points - left.points).slice(0, 3);
   const hiddenFindingCount = Math.max(0, result.findings.length - visibleFindings.length);
   return (
-    <View style={[styles.riskPanel, { backgroundColor: levelBg(theme, result.level), borderColor: color }]}>
+    <Pop style={[styles.riskPanel, { backgroundColor: levelBg(theme, result.level), borderColor: color }]}>
       <View style={styles.riskTop}>
         <View style={styles.riskTextColumn}>
           <Text style={[styles.riskLabel, { color }]}>{labelForLevel(result.level)}</Text>
@@ -1605,7 +1909,7 @@ function RiskPanel({ result }: { result: AnalysisResult }) {
           <Text style={styles.bulletText}>{step}</Text>
         </View>
       ))}
-    </View>
+    </Pop>
   );
 }
 
@@ -1614,7 +1918,7 @@ function CallRiskPanel({ result }: { result: CallRiskResult }) {
   const styles = useMemo(() => makeStyles(theme), [theme]);
   const color = levelColor(theme, result.level);
   return (
-    <View style={[styles.riskPanel, { backgroundColor: levelBg(theme, result.level), borderColor: color }]}>
+    <Pop style={[styles.riskPanel, { backgroundColor: levelBg(theme, result.level), borderColor: color }]}>
       <View style={styles.riskTop}>
         <View style={styles.riskTextColumn}>
           <Text style={[styles.riskLabel, { color }]}>{result.uncertain ? 'Possible risk' : 'Spoofing / scam check'}</Text>
@@ -1640,7 +1944,7 @@ function CallRiskPanel({ result }: { result: CallRiskResult }) {
         <Text style={styles.scriptLabel}>Recommendation</Text>
         <Text style={styles.scriptText}>{result.recommendation}</Text>
       </View>
-    </View>
+    </Pop>
   );
 }
 
@@ -1650,7 +1954,7 @@ function ToggleRow({ label, value, onValueChange }: { label: string; value: bool
   return (
     <View style={styles.toggleRow}>
       <Text style={styles.toggleLabel}>{label}</Text>
-      <Switch value={value} onValueChange={onValueChange} trackColor={{ false: theme.colors.lineStrong, true: theme.colors.brand }} thumbColor={theme.colors.white} accessibilityLabel={label} />
+      <AnimatedToggle value={value} onValueChange={onValueChange} accessibilityLabel={label} />
     </View>
   );
 }
@@ -1659,10 +1963,16 @@ function SecondaryAction({ icon: Icon, label, onPress, disabled }: { icon: Lucid
   const theme = useTheme();
   const styles = useMemo(() => makeStyles(theme), [theme]);
   return (
-    <TouchableOpacity style={[styles.secondaryAction, disabled && styles.disabledButton]} onPress={onPress} disabled={disabled} activeOpacity={0.75} accessibilityRole="button" accessibilityState={{ disabled: Boolean(disabled) }}>
+    <PressableScale
+      style={[styles.secondaryAction, disabled && styles.disabledButton]}
+      onPress={onPress}
+      disabled={disabled}
+      accessibilityLabel={label}
+      accessibilityState={{ disabled: Boolean(disabled) }}
+    >
       <Icon size={theme.icon(19)} color={disabled ? theme.colors.faint : theme.colors.brand} />
       <Text style={[styles.secondaryActionText, disabled && styles.disabledText]}>{label}</Text>
-    </TouchableOpacity>
+    </PressableScale>
   );
 }
 
@@ -1688,12 +1998,7 @@ function AttachmentLabel({ icon: Icon, label, onClear }: { icon: LucideIcon; lab
 function ProgressBar({ value }: { value: number }) {
   const theme = useTheme();
   const styles = useMemo(() => makeStyles(theme), [theme]);
-  const width = `${Math.max(4, Math.min(100, value))}%` as DimensionValue;
-  return (
-    <View style={styles.progressTrack}>
-      <View style={[styles.progressFill, { width }]} />
-    </View>
-  );
+  return <AnimatedBar value={Math.max(4, value)} trackStyle={styles.progressTrack} fillStyle={styles.progressFill} />;
 }
 
 function ActivityRow({ event, detailed }: { event: DetectionEvent; detailed?: boolean }) {
@@ -1766,12 +2071,12 @@ function TrustedContactStrip({
               <Text style={styles.contactName}>{contact.name || contact.label}</Text>
               <Text style={styles.smallMuted}>{contact.phone}</Text>
             </View>
-            <TouchableOpacity style={styles.iconButton} onPress={() => onCall(contact)} accessibilityLabel={`Call ${contact.name || contact.label}`}>
+            <PressableScale style={styles.iconButton} onPress={() => onCall(contact)} pressedScale={0.9} accessibilityLabel={`Call ${contact.name || contact.label}`}>
               <Phone size={theme.icon(21)} color={theme.colors.brand} />
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.iconButton} onPress={() => onText(contact)} accessibilityLabel={`Text ${contact.name || contact.label}`}>
+            </PressableScale>
+            <PressableScale style={styles.iconButton} onPress={() => onText(contact)} pressedScale={0.9} accessibilityLabel={`Text ${contact.name || contact.label}`}>
               <MessageCircle size={theme.icon(21)} color={theme.colors.brand} />
-            </TouchableOpacity>
+            </PressableScale>
           </View>
         ))
       ) : (
@@ -1781,94 +2086,296 @@ function TrustedContactStrip({
   );
 }
 
-function WeekCard({ module }: { module: WeeklyModule }) {
+function WeekRow({
+  module,
+  createdAt,
+  completed,
+  onOpen,
+}: {
+  module: WeeklyModule;
+  createdAt: string;
+  completed: boolean;
+  onOpen: () => void;
+}) {
   const theme = useTheme();
   const styles = useMemo(() => makeStyles(theme), [theme]);
-  const { progress, updateProgress } = useApp();
-  const completed = progress.completedWeeks.includes(module.id);
-  const [open, setOpen] = useState(false);
-  const [answer, setAnswer] = useState<number | null>(null);
-  const answered = answer !== null;
+  const unlocked = isWeekUnlocked(createdAt, module.week);
+  const days = daysUntilUnlock(createdAt, module.week);
+
+  return (
+    <PressableScale
+      style={[styles.weekRow, !unlocked && styles.weekRowLocked]}
+      onPress={onOpen}
+      disabled={!unlocked}
+      pressedScale={0.98}
+      accessibilityLabel={`Week ${module.week}. ${module.title}. ${unlocked ? '' : `Unlocks in ${days} days.`}`}
+    >
+      <View
+        style={[
+          styles.weekBadge,
+          completed && { backgroundColor: theme.colors.brand },
+          !unlocked && { backgroundColor: theme.colors.surfaceMuted },
+        ]}
+      >
+        {completed ? (
+          <CheckCircle2 size={theme.icon(24)} color={theme.colors.onBrand} strokeWidth={2.6} />
+        ) : unlocked ? (
+          <Text style={styles.weekBadgeText}>{module.week}</Text>
+        ) : (
+          <Lock size={theme.icon(20)} color={theme.colors.faint} strokeWidth={2.4} />
+        )}
+      </View>
+      <View style={{ flex: 1 }}>
+        <Text style={styles.weekEyebrow}>
+          Week {module.week} · {module.minutes} min{completed ? ' · Done' : ''}
+        </Text>
+        <Text style={[styles.weekTitle, !unlocked && { color: theme.colors.muted }]}>{module.title}</Text>
+        {!unlocked ? <Text style={styles.weekLocked}>Opens in {days} day{days === 1 ? '' : 's'}</Text> : null}
+      </View>
+      {unlocked ? <ChevronRight size={theme.icon(24)} color={theme.colors.faint} strokeWidth={2.4} /> : null}
+    </PressableScale>
+  );
+}
+
+// Full-screen lesson: read the lesson, then a 5-question quiz, then a result.
+function LessonScreen({ module, onBack }: { module: WeeklyModule; onBack: () => void }) {
+  const theme = useTheme();
+  const styles = useMemo(() => makeStyles(theme), [theme]);
+  const { progress, updateProgress, recordStreak } = useApp();
+  const [phase, setPhase] = useState<'read' | 'quiz' | 'done'>('read');
+  const [qIndex, setQIndex] = useState(0);
+  const [selected, setSelected] = useState<number | null>(null);
+  const [correct, setCorrect] = useState(0);
+
+  const total = module.quiz.length;
+  const question = module.quiz[qIndex];
+  const answered = selected !== null;
+  const isLast = qIndex === total - 1;
 
   function choose(index: number) {
     if (answered) return;
-    setAnswer(index);
-    if (index === module.quiz.answerIndex && !completed) {
-      updateProgress({
-        ...progress,
-        completedWeeks: [...progress.completedWeeks, module.id],
-        quizScores: { ...progress.quizScores, [module.id]: 100 },
-        currentWeek: Math.max(progress.currentWeek, module.week + 1),
-        lastActivity: new Date().toISOString(),
-      });
-    }
+    setSelected(index);
+    if (index === question.answerIndex) setCorrect((c) => c + 1);
   }
 
-  return (
-    <View style={styles.weekCard}>
-      <TouchableOpacity style={styles.weekTop} onPress={() => setOpen(!open)} activeOpacity={0.8} accessibilityRole="button">
-        <View style={[styles.weekBadge, completed && { backgroundColor: theme.colors.brand }]}>
-          {completed ? <CheckCircle2 size={theme.icon(20)} color={theme.colors.onBrand} strokeWidth={2.6} /> : <Text style={styles.weekBadgeText}>{module.week}</Text>}
-        </View>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.weekEyebrow}>
-            Week {module.week} · {module.minutes} min
-          </Text>
-          <Text style={styles.weekTitle}>{module.title}</Text>
-        </View>
-        <ChevronDown size={theme.icon(22)} color={theme.colors.muted} style={open ? styles.chevronOpen : undefined} />
-      </TouchableOpacity>
+  function next() {
+    if (!isLast) {
+      setQIndex((i) => i + 1);
+      setSelected(null);
+      return;
+    }
+    const score = Math.round((correct / total) * 100);
+    updateProgress({
+      ...progress,
+      completedWeeks: progress.completedWeeks.includes(module.id) ? progress.completedWeeks : [...progress.completedWeeks, module.id],
+      quizScores: { ...progress.quizScores, [module.id]: score },
+      currentWeek: Math.max(progress.currentWeek, module.week + 1),
+      lastActivity: new Date().toISOString(),
+    });
+    recordStreak();
+    setPhase('done');
+  }
 
-      {open ? (
-        <View style={styles.weekBody}>
-          <Text style={styles.cardBody}>{module.lesson}</Text>
+  if (phase === 'read') {
+    return (
+      <View style={styles.lessonStack}>
+        <Text style={styles.lessonEyebrow}>Week {module.week} · {module.minutes} min read</Text>
+        <Text style={styles.lessonTitle}>{module.title}</Text>
+        <Text style={styles.lessonBody}>{module.lesson}</Text>
+
+        <View style={styles.lessonKeyPoints}>
           {module.keyPoints.map((point) => (
-            <View key={point} style={styles.bulletRow}>
-              <CheckCircle2 size={theme.icon(18)} color={theme.colors.brand} />
-              <Text style={styles.bulletText}>{point}</Text>
+            <View key={point} style={styles.lessonBullet}>
+              <CheckCircle2 size={theme.icon(24)} color={theme.colors.brand} strokeWidth={2.4} />
+              <Text style={styles.lessonBulletText}>{point}</Text>
             </View>
           ))}
-          <View style={styles.exampleBox}>
-            <Text style={styles.scriptLabel}>Example · {module.example.channel}</Text>
-            <Text style={styles.scriptText}>{module.example.message}</Text>
-          </View>
-          <Text style={styles.cardBody}>{module.explanation}</Text>
+        </View>
 
-          <Text style={styles.nextTitle}>Quick question</Text>
-          <Text style={styles.quizPrompt}>{module.quiz.prompt}</Text>
-          {module.quiz.options.map((option, index) => {
-            const isCorrect = answered && index === module.quiz.answerIndex;
-            const isWrong = answered && index === answer && index !== module.quiz.answerIndex;
+        <View style={styles.exampleBox}>
+          <View style={styles.exampleHead}>
+            <AlertTriangle size={theme.icon(20)} color={theme.colors.high} strokeWidth={2.4} />
+            <Text style={styles.scriptLabel}>Real example · {module.example.channel}</Text>
+          </View>
+          <Text style={styles.exampleText}>{module.example.message}</Text>
+        </View>
+
+        <Text style={styles.lessonBody}>{module.explanation}</Text>
+
+        <View style={styles.rememberBox}>
+          <ShieldCheck size={theme.icon(24)} color={theme.colors.accent} strokeWidth={2.4} />
+          <Text style={styles.rememberBoxText}>{module.remember}</Text>
+        </View>
+
+        <Btn label={`Start the quiz (${total} questions)`} icon={Trophy} onPress={() => setPhase('quiz')} />
+      </View>
+    );
+  }
+
+  if (phase === 'quiz') {
+    return (
+      <View style={styles.lessonStack}>
+        <View style={styles.quizHeader}>
+          <Text style={styles.quizCounter}>Question {qIndex + 1} of {total}</Text>
+          <ProgressBarTinted value={Math.round(((qIndex + (answered ? 1 : 0)) / total) * 100)} />
+        </View>
+        <Text style={styles.quizPromptBig}>{question.prompt}</Text>
+        <View style={styles.quizOptions}>
+          {question.options.map((option, index) => {
+            const isCorrect = answered && index === question.answerIndex;
+            const isWrong = answered && index === selected && index !== question.answerIndex;
             return (
               <TouchableOpacity
                 key={option}
                 style={[styles.quizOption, isCorrect && styles.quizCorrect, isWrong && styles.quizWrong]}
                 onPress={() => choose(index)}
                 disabled={answered}
-                activeOpacity={0.8}
+                activeOpacity={0.85}
+                accessibilityRole="button"
               >
                 {isCorrect ? (
-                  <CheckCircle2 size={theme.icon(20)} color={theme.colors.low} />
+                  <CheckCircle2 size={theme.icon(24)} color={theme.colors.low} strokeWidth={2.5} />
                 ) : isWrong ? (
-                  <X size={theme.icon(20)} color={theme.colors.danger} />
+                  <X size={theme.icon(24)} color={theme.colors.danger} strokeWidth={2.5} />
                 ) : (
-                  <Circle size={theme.icon(20)} color={theme.colors.muted} />
+                  <Circle size={theme.icon(24)} color={theme.colors.muted} strokeWidth={2.2} />
                 )}
                 <Text style={styles.quizOptionText}>{option}</Text>
               </TouchableOpacity>
             );
           })}
-          {answered ? (
-            <View style={[styles.quizFeedback, { borderColor: answer === module.quiz.answerIndex ? theme.colors.low : theme.colors.high }]}>
-              <Text style={[styles.quizFeedbackTitle, { color: answer === module.quiz.answerIndex ? theme.colors.low : theme.colors.high }]}>
-                {answer === module.quiz.answerIndex ? 'Correct!' : 'Not quite'}
-              </Text>
-              <Text style={styles.cardBody}>{module.quiz.whyCorrect}</Text>
-            </View>
-          ) : null}
-          <Text style={styles.rememberText}>{module.remember}</Text>
         </View>
-      ) : null}
+        {answered ? (
+          <View style={[styles.quizFeedback, { borderColor: selected === question.answerIndex ? theme.colors.low : theme.colors.high }]}>
+            <Text style={[styles.quizFeedbackTitle, { color: selected === question.answerIndex ? theme.colors.low : theme.colors.high }]}>
+              {selected === question.answerIndex ? 'Correct!' : 'Not quite'}
+            </Text>
+            <Text style={styles.cardBody}>{question.whyCorrect}</Text>
+          </View>
+        ) : null}
+        {answered ? <Btn label={isLast ? 'See my results' : 'Next question'} icon={ChevronRight} onPress={next} /> : null}
+      </View>
+    );
+  }
+
+  const score = Math.round((correct / total) * 100);
+  const passed = score >= 60;
+  return (
+    <View style={styles.lessonStack}>
+      <View style={styles.resultBox}>
+        <View style={[styles.resultIcon, { backgroundColor: passed ? theme.colors.lowTint : theme.colors.warnTint }]}>
+          {passed ? (
+            <Trophy size={theme.icon(44)} color={theme.colors.low} strokeWidth={2.2} />
+          ) : (
+            <GraduationCap size={theme.icon(44)} color={theme.colors.warn} strokeWidth={2.2} />
+          )}
+        </View>
+        <Text style={styles.resultScore}>{correct} / {total}</Text>
+        <Text style={styles.resultTitle}>{passed ? 'Well done!' : 'Good effort'}</Text>
+        <Text style={styles.resultText}>
+          {passed ? 'You’ve got the key ideas for this week. This lesson is now complete.' : 'Review the lesson and try again any time — practice builds the habit.'}
+        </Text>
+      </View>
+      <Btn label="Back to lessons" icon={BookOpen} onPress={onBack} />
+      <Btn
+        label="Read the lesson again"
+        variant="secondary"
+        icon={ChevronLeft}
+        onPress={() => {
+          setPhase('read');
+          setQIndex(0);
+          setSelected(null);
+          setCorrect(0);
+        }}
+      />
+    </View>
+  );
+}
+
+// A green-track progress bar used inside lessons.
+function ProgressBarTinted({ value }: { value: number }) {
+  const theme = useTheme();
+  const styles = useMemo(() => makeStyles(theme), [theme]);
+  return <AnimatedBar value={Math.max(4, value)} trackStyle={styles.quizTrack} fillStyle={styles.quizFill} />;
+}
+
+// First-run feature walkthrough shown once after onboarding.
+function Walkthrough({ onLesson, onQuickCheck, onSkip }: { onLesson: () => void; onQuickCheck: () => void; onSkip: () => void }) {
+  const theme = useTheme();
+  const styles = useMemo(() => makeStyles(theme), [theme]);
+  const [index, setIndex] = useState(0);
+  const slides = [
+    {
+      icon: ShieldCheck,
+      title: 'This is your scam shield',
+      body: 'When a call, message, or email doesn’t feel right, Shield Our Elders helps you slow down and check it calmly. You always have time.',
+    },
+    {
+      icon: LayoutGrid,
+      title: 'Check anything in seconds',
+      body: 'From Checks, look at a message, phone call, link, QR code, number, or payment. We explain the warning signs in plain words.',
+    },
+    {
+      icon: Siren,
+      title: 'Help when it counts',
+      body: 'Tap the big red “I think this is a scam” button any time for calm, step-by-step safety actions — and reach a trusted person fast.',
+    },
+    {
+      icon: GraduationCap,
+      title: 'Learn and play each week',
+      body: 'A short new lesson opens weekly, plus 8 fun games. Play each week to build a streak and grow your confidence.',
+    },
+  ];
+  const total = slides.length;
+  const isReady = index === total; // final choice screen
+  const slide = slides[Math.min(index, total - 1)];
+  const Icon = slide.icon;
+
+  return (
+    <View style={styles.walkRoot}>
+      <View style={styles.walkTop}>
+        <TouchableOpacity onPress={onSkip} accessibilityRole="button" style={styles.walkSkip}>
+          <Text style={styles.walkSkipText}>Skip</Text>
+        </TouchableOpacity>
+      </View>
+
+      {isReady ? (
+        <Reveal key="ready" style={styles.walkBody}>
+          <View style={[styles.walkIcon, { backgroundColor: theme.colors.low }]}>
+            <CheckCircle2 size={theme.icon(56)} color={theme.colors.onBrand} strokeWidth={2.2} />
+          </View>
+          <Text style={styles.walkTitle}>You’re all set!</Text>
+          <Text style={styles.walkText}>Would you like to try a quick check now, or start your first weekly lesson?</Text>
+        </Reveal>
+      ) : (
+        <Reveal key={index} style={styles.walkBody}>
+          <View style={styles.walkIcon}>
+            <Icon size={theme.icon(56)} color={theme.colors.onBrand} strokeWidth={2.2} />
+          </View>
+          <Text style={styles.walkTitle}>{slide.title}</Text>
+          <Text style={styles.walkText}>{slide.body}</Text>
+          <View style={styles.walkDots}>
+            {slides.map((_, i) => (
+              <View key={i} style={[styles.walkDot, i === index && styles.walkDotActive]} />
+            ))}
+          </View>
+        </Reveal>
+      )}
+
+      <View style={styles.walkFooter}>
+        {isReady ? (
+          <>
+            <Btn label="Try a quick check" icon={ShieldCheck} onPress={onQuickCheck} />
+            <View style={{ height: theme.space.sm }} />
+            <Btn label="Start my first lesson" variant="secondary" icon={GraduationCap} onPress={onLesson} />
+            <TouchableOpacity onPress={onSkip} style={styles.walkSkip} accessibilityRole="button">
+              <Text style={[styles.walkSkipText, { textAlign: 'center' }]}>Maybe later — go to home</Text>
+            </TouchableOpacity>
+          </>
+        ) : (
+          <Btn label="Next" icon={ChevronRight} onPress={() => setIndex((i) => i + 1)} />
+        )}
+      </View>
     </View>
   );
 }
@@ -1877,6 +2384,801 @@ function WeekCard({ module }: { module: WeeklyModule }) {
 // ---------------------------------------------------------------------------
 // Themed styles
 // ---------------------------------------------------------------------------
+
+// Bottom-nav item: color-only active state (no background pill), big icon,
+// gentle press animation.
+function NavItem({ icon: Icon, label, active, onPress }: { icon: LucideIcon; label: string; active: boolean; onPress: () => void }) {
+  const theme = useTheme();
+  const styles = useMemo(() => makeStyles(theme), [theme]);
+  const scale = useRef(new Animated.Value(1)).current;
+  const press = (to: number) => {
+    if (theme.reducedMotion) return;
+    Animated.spring(scale, { toValue: to, useNativeDriver: true, speed: 60, bounciness: 8 }).start();
+  };
+  const color = active ? theme.colors.brand : theme.colors.muted;
+  return (
+    <TouchableOpacity
+      style={styles.navItem}
+      onPress={onPress}
+      onPressIn={() => press(0.88)}
+      onPressOut={() => press(1)}
+      activeOpacity={0.8}
+      accessibilityRole="button"
+      accessibilityState={{ selected: active }}
+      accessibilityLabel={label}
+    >
+      <Animated.View style={{ transform: [{ scale }] }}>
+        <Icon size={theme.icon(34)} color={color} strokeWidth={active ? 2.1 : 1.8} />
+      </Animated.View>
+      <Text style={[styles.navLabel, { color }, active && styles.navLabelActive]}>{label}</Text>
+    </TouchableOpacity>
+  );
+}
+
+function ScrambleGame({ onBack, onWin }: { onBack: () => void; onWin: () => void }) {
+  const theme = useTheme();
+  const styles = useMemo(() => makeStyles(theme), [theme]);
+  const [index, setIndex] = useState(0);
+  const word = scrambleWords[index % scrambleWords.length];
+  const [scrambled, setScrambled] = useState<string[]>(() => shuffle(word.word.split('')));
+  const [picked, setPicked] = useState<number[]>([]);
+  const answer = picked.map((i) => scrambled[i]).join('');
+  const filled = picked.length === word.word.length;
+  const solved = filled && answer === word.word;
+  useEffect(() => {
+    if (solved) onWin();
+  }, [solved, onWin]);
+
+  function goNext() {
+    const next = index + 1;
+    const w = scrambleWords[next % scrambleWords.length];
+    setIndex(next);
+    setScrambled(shuffle(w.word.split('')));
+    setPicked([]);
+  }
+
+  return (
+    <View style={styles.stack}>
+      <TouchableOpacity style={styles.gameBack} onPress={onBack} accessibilityRole="button">
+        <ChevronLeft size={theme.icon(22)} color={theme.colors.brand} strokeWidth={2.2} />
+        <Text style={styles.gameBackText}>All games</Text>
+      </TouchableOpacity>
+      <Text style={styles.gameHeading}>Word Scramble</Text>
+      <View style={styles.hintBox}>
+        <Text style={styles.hintLabel}>Hint</Text>
+        <Text style={styles.hintText}>{word.hint}</Text>
+      </View>
+      <View style={styles.answerRow}>
+        {word.word.split('').map((_, i) => (
+          <View key={i} style={[styles.answerSlot, solved && styles.answerSlotSolved, filled && !solved && styles.answerSlotWrong]}>
+            <Text style={styles.answerSlotText}>{picked[i] != null ? scrambled[picked[i]] : ''}</Text>
+          </View>
+        ))}
+      </View>
+      <View style={styles.tileRow}>
+        {scrambled.map((ch, i) => {
+          const used = picked.includes(i);
+          return (
+            <TouchableOpacity
+              key={i}
+              disabled={used || solved}
+              style={[styles.letterTile, used && styles.letterTileUsed]}
+              onPress={() => setPicked((p) => [...p, i])}
+              accessibilityLabel={`letter ${ch}`}
+            >
+              <Text style={[styles.letterText, used && { color: theme.colors.faint }]}>{ch}</Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+      {solved ? (
+        <View style={styles.gameWin}>
+          <CheckCircle2 size={theme.icon(24)} color={theme.colors.low} strokeWidth={2.2} />
+          <Text style={styles.gameWinText}>Correct — {word.word}!</Text>
+        </View>
+      ) : null}
+      <View style={styles.buttonRow}>
+        <SecondaryAction icon={X} label="Undo" onPress={() => setPicked((p) => p.slice(0, -1))} disabled={!picked.length || solved} />
+        <SecondaryAction icon={Shuffle} label="Reshuffle" onPress={() => { setScrambled(shuffle(word.word.split(''))); setPicked([]); }} disabled={solved} />
+      </View>
+      {solved ? <Btn label="Next word" icon={ChevronRight} onPress={goNext} /> : null}
+    </View>
+  );
+}
+
+function MatchGame({ onBack, onWin }: { onBack: () => void; onWin: () => void }) {
+  const theme = useTheme();
+  const styles = useMemo(() => makeStyles(theme), [theme]);
+  const [meanings] = useState(() => shuffle(matchPairs));
+  const [selected, setSelected] = useState<string | null>(null);
+  const [matched, setMatched] = useState<string[]>([]);
+  const [wrong, setWrong] = useState<string | null>(null);
+  const allDone = matched.length === matchPairs.length;
+  useEffect(() => {
+    if (allDone) onWin();
+  }, [allDone, onWin]);
+
+  function tapMeaning(term: string) {
+    if (matched.includes(term)) return;
+    if (!selected) return;
+    if (selected === term) {
+      setMatched((m) => [...m, term]);
+      setSelected(null);
+    } else {
+      setWrong(term);
+      setTimeout(() => setWrong(null), 700);
+    }
+  }
+
+  return (
+    <View style={styles.stack}>
+      <TouchableOpacity style={styles.gameBack} onPress={onBack} accessibilityRole="button">
+        <ChevronLeft size={theme.icon(22)} color={theme.colors.brand} strokeWidth={2.2} />
+        <Text style={styles.gameBackText}>All games</Text>
+      </TouchableOpacity>
+      <Text style={styles.gameHeading}>Match the Term</Text>
+      <Text style={styles.screenIntro}>Tap a term on the left, then its meaning on the right.</Text>
+      <View style={styles.matchGrid}>
+        <View style={styles.matchCol}>
+          {matchPairs.map((p) => {
+            const done = matched.includes(p.term);
+            const sel = selected === p.term;
+            return (
+              <TouchableOpacity
+                key={p.term}
+                disabled={done}
+                onPress={() => setSelected(p.term)}
+                style={[styles.matchChip, sel && styles.matchChipSel, done && styles.matchChipDone]}
+                accessibilityRole="button"
+              >
+                <Text style={[styles.matchChipText, done && { color: theme.colors.onBrand }]}>{p.term}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+        <View style={styles.matchCol}>
+          {meanings.map((p) => {
+            const done = matched.includes(p.term);
+            const isWrong = wrong === p.term;
+            return (
+              <TouchableOpacity
+                key={p.term}
+                disabled={done}
+                onPress={() => tapMeaning(p.term)}
+                style={[styles.matchChip, styles.matchMeaning, done && styles.matchChipDone, isWrong && styles.matchChipWrong]}
+                accessibilityRole="button"
+              >
+                <Text style={[styles.matchMeaningText, done && { color: theme.colors.onBrand }]}>{p.meaning}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      </View>
+      {allDone ? (
+        <View style={styles.gameWin}>
+          <CheckCircle2 size={theme.icon(24)} color={theme.colors.low} strokeWidth={2.2} />
+          <Text style={styles.gameWinText}>All matched — well done!</Text>
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+// Side drawer that slides in from the right, with a fading dark overlay.
+function SideDrawer({ visible, onClose, children }: { visible: boolean; onClose: () => void; children: React.ReactNode }) {
+  const theme = useTheme();
+  const styles = useMemo(() => makeStyles(theme), [theme]);
+  const [mounted, setMounted] = useState(visible);
+  const anim = useRef(new Animated.Value(0)).current;
+  const panelW = Math.min(360, Math.round(Dimensions.get('window').width * 0.84));
+
+  useEffect(() => {
+    if (visible) {
+      setMounted(true);
+      Animated.timing(anim, { toValue: 1, duration: theme.reducedMotion ? 0 : 300, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start();
+    } else {
+      Animated.timing(anim, { toValue: 0, duration: theme.reducedMotion ? 0 : 220, easing: Easing.in(Easing.cubic), useNativeDriver: true }).start(({ finished }) => {
+        if (finished) setMounted(false);
+      });
+    }
+  }, [visible, anim, theme.reducedMotion]);
+
+  if (!mounted) return null;
+  const translateX = anim.interpolate({ inputRange: [0, 1], outputRange: [panelW + 40, 0] });
+
+  return (
+    <Modal visible transparent animationType="none" onRequestClose={onClose}>
+      <Animated.View style={[styles.drawerOverlay, { opacity: anim }]}>
+        <Pressable style={{ flex: 1 }} onPress={onClose} accessibilityLabel="Close menu" />
+      </Animated.View>
+      <Animated.View style={[styles.drawerPanel, { width: panelW, transform: [{ translateX }] }]}>{children}</Animated.View>
+    </Modal>
+  );
+}
+
+// Entrance animation: fade + slide up on mount, with optional stagger delay.
+function Reveal({ children, delay = 0, style }: { children: React.ReactNode; delay?: number; style?: object }) {
+  const theme = useTheme();
+  const a = useRef(new Animated.Value(theme.reducedMotion ? 1 : 0)).current;
+  useEffect(() => {
+    if (theme.reducedMotion) {
+      a.setValue(1);
+      return;
+    }
+    const anim = Animated.timing(a, { toValue: 1, duration: 400, delay, easing: Easing.out(Easing.cubic), useNativeDriver: true });
+    anim.start();
+    return () => anim.stop();
+  }, [a, delay, theme.reducedMotion]);
+  return (
+    <Animated.View style={[style, { opacity: a, transform: [{ translateY: a.interpolate({ inputRange: [0, 1], outputRange: [16, 0] }) }] }]}>
+      {children}
+    </Animated.View>
+  );
+}
+
+function StreakBanner({ streak, best }: { streak: number; best: number }) {
+  const theme = useTheme();
+  const styles = useMemo(() => makeStyles(theme), [theme]);
+  const pulse = useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    if (theme.reducedMotion || streak <= 0) return;
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, { toValue: 1.14, duration: 720, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+        Animated.timing(pulse, { toValue: 1, duration: 720, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [pulse, streak, theme.reducedMotion]);
+  return (
+    <View style={styles.streakBanner}>
+      <Animated.View style={[styles.streakFlame, { transform: [{ scale: pulse }] }]}>
+        <Flame size={theme.icon(30)} color={theme.colors.white} strokeWidth={2} />
+      </Animated.View>
+      <View style={{ flex: 1 }}>
+        <Text style={styles.streakNumber}>{streak > 0 ? `${streak}-week streak` : 'Start your streak'}</Text>
+        <Text style={styles.streakSub}>
+          {streak > 0 ? `Best: ${best} week${best === 1 ? '' : 's'} · play this week to keep it` : 'Play any game this week to begin'}
+        </Text>
+      </View>
+    </View>
+  );
+}
+
+function GameTile({ icon: Icon, title, tone, onPress }: { icon: LucideIcon; title: string; tone: number; onPress: () => void }) {
+  const theme = useTheme();
+  const styles = useMemo(() => makeStyles(theme), [theme]);
+  const scale = useRef(new Animated.Value(1)).current;
+  const press = (to: number) => {
+    if (theme.reducedMotion) return;
+    Animated.spring(scale, { toValue: to, useNativeDriver: true, speed: 40, bounciness: 6 }).start();
+  };
+  const tints = [theme.colors.brandTint, theme.colors.infoTint, theme.colors.accentTint, theme.colors.warnTint];
+  const fgs = [theme.colors.brand, theme.colors.info, theme.colors.accent, theme.colors.warn];
+  return (
+    <Animated.View style={{ transform: [{ scale }] }}>
+      <Pressable style={styles.gameTile} onPress={onPress} onPressIn={() => press(0.95)} onPressOut={() => press(1)} accessibilityRole="button" accessibilityLabel={title}>
+        <View style={[styles.gameTileIcon, { backgroundColor: tints[tone % 4] }]}>
+          <Icon size={theme.icon(32)} color={fgs[tone % 4]} strokeWidth={2} />
+        </View>
+        <Text style={styles.gameTileTitle}>{title}</Text>
+      </Pressable>
+    </Animated.View>
+  );
+}
+
+function GameHeader({ title, onBack }: { title: string; onBack: () => void }) {
+  const theme = useTheme();
+  const styles = useMemo(() => makeStyles(theme), [theme]);
+  return (
+    <>
+      <TouchableOpacity style={styles.gameBack} onPress={onBack} accessibilityRole="button">
+        <ChevronLeft size={theme.icon(22)} color={theme.colors.brand} strokeWidth={2.2} />
+        <Text style={styles.gameBackText}>All games</Text>
+      </TouchableOpacity>
+      <Text style={styles.gameHeading}>{title}</Text>
+    </>
+  );
+}
+
+// Celebratory spring-in (scale + slight rotate) for result/win icons.
+function BurstIcon({ children }: { children: React.ReactNode }) {
+  const theme = useTheme();
+  const v = useRef(new Animated.Value(theme.reducedMotion ? 1 : 0)).current;
+  useEffect(() => {
+    if (theme.reducedMotion) {
+      v.setValue(1);
+      return;
+    }
+    Animated.sequence([Animated.delay(120), Animated.spring(v, { toValue: 1, useNativeDriver: true, speed: 6, bounciness: 16 })]).start();
+  }, [v, theme.reducedMotion]);
+  const scale = v.interpolate({ inputRange: [0, 1], outputRange: [0.3, 1] });
+  const rotate = v.interpolate({ inputRange: [0, 1], outputRange: ['-22deg', '0deg'] });
+  return <Animated.View style={{ transform: [{ scale }, { rotate }] }}>{children}</Animated.View>;
+}
+
+function GameResult({ score, total, onReplay, onBack }: { score: number; total: number; onReplay: () => void; onBack: () => void }) {
+  const theme = useTheme();
+  const styles = useMemo(() => makeStyles(theme), [theme]);
+  const pct = total ? Math.round((score / total) * 100) : 0;
+  const great = pct >= 70;
+  return (
+    <View style={{ gap: theme.space.lg }}>
+      <Pop style={styles.resultBox}>
+        <BurstIcon>
+          <View style={[styles.resultIcon, { backgroundColor: great ? theme.colors.lowTint : theme.colors.warnTint }]}>
+            {great ? <Trophy size={theme.icon(44)} color={theme.colors.low} strokeWidth={2.2} /> : <Flame size={theme.icon(44)} color={theme.colors.warn} strokeWidth={2.2} />}
+          </View>
+        </BurstIcon>
+        <Text style={styles.resultScore}>{score} / {total}</Text>
+        <Text style={styles.resultTitle}>{great ? 'Great job!' : 'Nice effort!'}</Text>
+        <Text style={styles.resultText}>You earned this week’s streak. Come back next week to keep it growing.</Text>
+      </Pop>
+      <Btn label="Play again" icon={Shuffle} onPress={onReplay} />
+      <Btn label="All games" variant="secondary" icon={ChevronLeft} onPress={onBack} />
+    </View>
+  );
+}
+
+function CrosswordGame({ onBack, onWin }: { onBack: () => void; onWin: () => void }) {
+  const theme = useTheme();
+  const styles = useMemo(() => makeStyles(theme), [theme]);
+  const { solution, numberAt, cellsForClue } = useMemo(() => buildCrossword(), []);
+  const inputRef = useRef<TextInputInstance>(null);
+  const [cells, setCells] = useState<Record<string, string>>({});
+  const [activeIdx, setActiveIdx] = useState(0);
+
+  const activeClue = crosswordClues[activeIdx];
+  const activeCells = cellsForClue[`${activeClue.number}-${activeClue.direction}`];
+  const activeValue = activeCells.map((k) => cells[k] ?? '').join('');
+  const solved = Object.keys(solution).every((k) => (cells[k] ?? '') === solution[k]);
+  useEffect(() => {
+    if (solved) onWin();
+  }, [solved, onWin]);
+
+  function onType(text: string) {
+    const clean = text.toUpperCase().replace(/[^A-Z]/g, '').slice(0, activeCells.length);
+    setCells((prev) => {
+      const next = { ...prev };
+      activeCells.forEach((k, i) => {
+        next[k] = clean[i] ?? '';
+      });
+      return next;
+    });
+  }
+
+  function selectCell(r: number, c: number) {
+    const k = cellKey(r, c);
+    const matches = crosswordClues
+      .map((cl, i) => ({ i, cells: cellsForClue[`${cl.number}-${cl.direction}`] }))
+      .filter((m) => m.cells.includes(k))
+      .map((m) => m.i);
+    if (!matches.length) return;
+    const other = matches.find((i) => i !== activeIdx);
+    setActiveIdx(activeCells.includes(k) && other != null ? other : matches[0]);
+    inputRef.current?.focus();
+  }
+
+  return (
+    <View style={styles.stack}>
+      <GameHeader title="Crossword" onBack={onBack} />
+      <Text style={styles.screenIntro}>Tap a clue, then type its answer. Fill every square to win.</Text>
+
+      <View style={styles.crossGrid}>
+        {Array.from({ length: crosswordSize }).map((_, r) => (
+          <View key={r} style={styles.crossRow}>
+            {Array.from({ length: crosswordSize }).map((_, c) => {
+              const k = cellKey(r, c);
+              if (solution[k] == null) return <View key={c} style={styles.crossBlank} />;
+              const active = activeCells.includes(k);
+              const letter = cells[k] ?? '';
+              const correct = solved || (letter !== '' && letter === solution[k]);
+              return (
+                <TouchableOpacity
+                  key={c}
+                  style={[styles.crossCell, active && styles.crossCellActive, correct && styles.crossCellCorrect]}
+                  onPress={() => selectCell(r, c)}
+                  activeOpacity={0.8}
+                >
+                  {numberAt[k] ? <Text style={styles.crossNum}>{numberAt[k]}</Text> : null}
+                  <Text style={styles.crossLetter}>{letter}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        ))}
+      </View>
+
+      <TextInput
+        ref={inputRef}
+        style={styles.crossInput}
+        value={activeValue}
+        onChangeText={onType}
+        autoCapitalize="characters"
+        autoCorrect={false}
+        maxLength={activeCells.length}
+        placeholder={`Answer for ${activeClue.number} ${activeClue.direction}`}
+        placeholderTextColor={theme.colors.faint}
+      />
+
+      <View style={{ gap: theme.space.sm }}>
+        {crosswordClues.map((cl, i) => {
+          const done = cellsForClue[`${cl.number}-${cl.direction}`].every((k) => (cells[k] ?? '') === solution[k]);
+          return (
+            <TouchableOpacity
+              key={`${cl.number}-${cl.direction}`}
+              onPress={() => {
+                setActiveIdx(i);
+                inputRef.current?.focus();
+              }}
+              style={[styles.clueRow, i === activeIdx && styles.clueRowActive]}
+              accessibilityRole="button"
+            >
+              <Text style={styles.clueNum}>
+                {cl.number} {cl.direction === 'across' ? 'Across' : 'Down'}
+              </Text>
+              <Text style={[styles.clueText, done && { color: theme.colors.low }]}>
+                {cl.clue}
+                {done ? '  ✓' : ''}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+
+      {solved ? (
+        <View style={styles.gameWin}>
+          <CheckCircle2 size={theme.icon(24)} color={theme.colors.low} strokeWidth={2.2} />
+          <Text style={styles.gameWinText}>Solved — well done!</Text>
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+function TrueFalseGame({ onBack, onWin }: { onBack: () => void; onWin: () => void }) {
+  const theme = useTheme();
+  const styles = useMemo(() => makeStyles(theme), [theme]);
+  const [items] = useState(() => shuffle(trueFalseItems));
+  const [idx, setIdx] = useState(0);
+  const [choice, setChoice] = useState<boolean | null>(null);
+  const [correct, setCorrect] = useState(0);
+  const [finished, setFinished] = useState(false);
+  useEffect(() => {
+    if (finished) onWin();
+  }, [finished, onWin]);
+
+  if (finished) {
+    return (
+      <View style={styles.stack}>
+        <GameHeader title="True or False" onBack={onBack} />
+        <GameResult
+          score={correct}
+          total={items.length}
+          onReplay={() => {
+            setIdx(0);
+            setChoice(null);
+            setCorrect(0);
+            setFinished(false);
+          }}
+          onBack={onBack}
+        />
+      </View>
+    );
+  }
+
+  const item = items[idx];
+  const answered = choice !== null;
+  const right = choice === item.answer;
+
+  return (
+    <View style={styles.stack}>
+      <GameHeader title="True or False" onBack={onBack} />
+      <Text style={styles.gameCounter}>Question {idx + 1} of {items.length}</Text>
+      <View style={styles.tfCard}>
+        <Text style={styles.tfStatement}>{item.statement}</Text>
+      </View>
+      <View style={styles.tfButtons}>
+        <TouchableOpacity
+          style={[styles.tfBtn, answered && item.answer === true && styles.tfBtnCorrect, answered && choice === true && item.answer !== true && styles.tfBtnWrong]}
+          disabled={answered}
+          onPress={() => {
+            setChoice(true);
+            if (item.answer === true) setCorrect((c) => c + 1);
+          }}
+        >
+          <CheckCircle2 size={theme.icon(26)} color={theme.colors.low} strokeWidth={2.2} />
+          <Text style={styles.tfBtnText}>True</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.tfBtn, answered && item.answer === false && styles.tfBtnCorrect, answered && choice === false && item.answer !== false && styles.tfBtnWrong]}
+          disabled={answered}
+          onPress={() => {
+            setChoice(false);
+            if (item.answer === false) setCorrect((c) => c + 1);
+          }}
+        >
+          <X size={theme.icon(26)} color={theme.colors.danger} strokeWidth={2.2} />
+          <Text style={styles.tfBtnText}>False</Text>
+        </TouchableOpacity>
+      </View>
+      {answered ? (
+        <View style={[styles.quizFeedback, { borderColor: right ? theme.colors.low : theme.colors.high }]}>
+          <Text style={[styles.quizFeedbackTitle, { color: right ? theme.colors.low : theme.colors.high }]}>{right ? 'Correct!' : 'Not quite'}</Text>
+          <Text style={styles.cardBody}>{item.why}</Text>
+        </View>
+      ) : null}
+      {answered ? (
+        <Btn
+          label={idx === items.length - 1 ? 'See my score' : 'Next'}
+          icon={ChevronRight}
+          onPress={() => {
+            if (idx === items.length - 1) setFinished(true);
+            else {
+              setIdx((i) => i + 1);
+              setChoice(null);
+            }
+          }}
+        />
+      ) : null}
+    </View>
+  );
+}
+
+function FillBlankGame({ onBack, onWin }: { onBack: () => void; onWin: () => void }) {
+  const theme = useTheme();
+  const styles = useMemo(() => makeStyles(theme), [theme]);
+  const [items] = useState(() => shuffle(fillBlankItems).map((it) => ({ ...it, options: shuffle(it.options) })));
+  const [idx, setIdx] = useState(0);
+  const [choice, setChoice] = useState<string | null>(null);
+  const [correct, setCorrect] = useState(0);
+  const [finished, setFinished] = useState(false);
+  useEffect(() => {
+    if (finished) onWin();
+  }, [finished, onWin]);
+
+  if (finished) {
+    return (
+      <View style={styles.stack}>
+        <GameHeader title="Fill the Blank" onBack={onBack} />
+        <GameResult
+          score={correct}
+          total={items.length}
+          onReplay={() => {
+            setIdx(0);
+            setChoice(null);
+            setCorrect(0);
+            setFinished(false);
+          }}
+          onBack={onBack}
+        />
+      </View>
+    );
+  }
+
+  const item = items[idx];
+  const answered = choice !== null;
+
+  return (
+    <View style={styles.stack}>
+      <GameHeader title="Fill the Blank" onBack={onBack} />
+      <Text style={styles.gameCounter}>Question {idx + 1} of {items.length}</Text>
+      <View style={styles.tfCard}>
+        <Text style={styles.fillSentence}>
+          {item.before} <Text style={styles.fillBlankMark}>{answered ? item.answer : '_____'}</Text> {item.after}
+        </Text>
+      </View>
+      <View style={{ gap: theme.space.sm }}>
+        {item.options.map((opt) => {
+          const isRight = opt === item.answer;
+          const chosen = choice === opt;
+          return (
+            <TouchableOpacity
+              key={opt}
+              disabled={answered}
+              style={[
+                styles.fillOption,
+                answered && isRight && { borderColor: theme.colors.low, backgroundColor: theme.colors.lowTint },
+                answered && chosen && !isRight && { borderColor: theme.colors.danger, backgroundColor: theme.colors.dangerTint },
+              ]}
+              onPress={() => {
+                setChoice(opt);
+                if (isRight) setCorrect((c) => c + 1);
+              }}
+              accessibilityRole="button"
+            >
+              {answered && isRight ? (
+                <CheckCircle2 size={theme.icon(20)} color={theme.colors.low} strokeWidth={2.2} />
+              ) : answered && chosen ? (
+                <X size={theme.icon(20)} color={theme.colors.danger} strokeWidth={2.2} />
+              ) : (
+                <Circle size={theme.icon(20)} color={theme.colors.muted} strokeWidth={2} />
+              )}
+              <Text style={styles.fillOptionText}>{opt}</Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+      {answered ? (
+        <Btn
+          label={idx === items.length - 1 ? 'See my score' : 'Next'}
+          icon={ChevronRight}
+          onPress={() => {
+            if (idx === items.length - 1) setFinished(true);
+            else {
+              setIdx((i) => i + 1);
+              setChoice(null);
+            }
+          }}
+        />
+      ) : null}
+    </View>
+  );
+}
+
+function RedFlagGame({ onBack, onWin }: { onBack: () => void; onWin: () => void }) {
+  const theme = useTheme();
+  const styles = useMemo(() => makeStyles(theme), [theme]);
+  const [items] = useState(() => shuffle(redFlagItems));
+  const [idx, setIdx] = useState(0);
+  const [choice, setChoice] = useState<boolean | null>(null);
+  const [correct, setCorrect] = useState(0);
+  const [finished, setFinished] = useState(false);
+  useEffect(() => {
+    if (finished) onWin();
+  }, [finished, onWin]);
+
+  if (finished) {
+    return (
+      <View style={styles.stack}>
+        <GameHeader title="Red Flag Rush" onBack={onBack} />
+        <GameResult
+          score={correct}
+          total={items.length}
+          onReplay={() => {
+            setIdx(0);
+            setChoice(null);
+            setCorrect(0);
+            setFinished(false);
+          }}
+          onBack={onBack}
+        />
+      </View>
+    );
+  }
+
+  const item = items[idx];
+  const answered = choice !== null;
+  const right = choice === item.scam;
+
+  return (
+    <View style={styles.stack}>
+      <GameHeader title="Red Flag Rush" onBack={onBack} />
+      <Text style={styles.gameCounter}>{idx + 1} of {items.length} · Is it a scam?</Text>
+      <View style={styles.rfCard}>
+        <Text style={styles.rfText}>{item.text}</Text>
+      </View>
+      <View style={styles.tfButtons}>
+        <TouchableOpacity
+          style={[styles.tfBtn, answered && item.scam === true && styles.tfBtnCorrect, answered && choice === true && !item.scam && styles.tfBtnWrong]}
+          disabled={answered}
+          onPress={() => {
+            setChoice(true);
+            if (item.scam) setCorrect((c) => c + 1);
+          }}
+        >
+          <Flag size={theme.icon(26)} color={theme.colors.danger} strokeWidth={2.2} />
+          <Text style={styles.tfBtnText}>Scam</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.tfBtn, answered && item.scam === false && styles.tfBtnCorrect, answered && choice === false && item.scam && styles.tfBtnWrong]}
+          disabled={answered}
+          onPress={() => {
+            setChoice(false);
+            if (!item.scam) setCorrect((c) => c + 1);
+          }}
+        >
+          <ShieldCheck size={theme.icon(26)} color={theme.colors.low} strokeWidth={2.2} />
+          <Text style={styles.tfBtnText}>Safe</Text>
+        </TouchableOpacity>
+      </View>
+      {answered ? (
+        <View style={[styles.quizFeedback, { borderColor: right ? theme.colors.low : theme.colors.high }]}>
+          <Text style={[styles.quizFeedbackTitle, { color: right ? theme.colors.low : theme.colors.high }]}>{right ? 'Correct!' : item.scam ? 'This one was a scam' : 'This one was safe'}</Text>
+        </View>
+      ) : null}
+      {answered ? (
+        <Btn
+          label={idx === items.length - 1 ? 'See my score' : 'Next'}
+          icon={ChevronRight}
+          onPress={() => {
+            if (idx === items.length - 1) setFinished(true);
+            else {
+              setIdx((i) => i + 1);
+              setChoice(null);
+            }
+          }}
+        />
+      ) : null}
+    </View>
+  );
+}
+
+interface MemoryCard {
+  id: string;
+  term: string;
+}
+
+function MemoryGame({ onBack, onWin }: { onBack: () => void; onWin: () => void }) {
+  const theme = useTheme();
+  const styles = useMemo(() => makeStyles(theme), [theme]);
+  const [deck] = useState<MemoryCard[]>(() => shuffle(memoryTerms.flatMap((t) => [{ id: `${t}-a`, term: t }, { id: `${t}-b`, term: t }])));
+  const [flipped, setFlipped] = useState<string[]>([]);
+  const [matched, setMatched] = useState<string[]>([]);
+  const [moves, setMoves] = useState(0);
+  const busy = useRef(false);
+  const allDone = matched.length === memoryTerms.length;
+  useEffect(() => {
+    if (allDone) onWin();
+  }, [allDone, onWin]);
+
+  function tap(card: MemoryCard) {
+    if (busy.current || matched.includes(card.term) || flipped.includes(card.id) || flipped.length === 2) return;
+    const nextFlipped = [...flipped, card.id];
+    setFlipped(nextFlipped);
+    if (nextFlipped.length === 2) {
+      setMoves((m) => m + 1);
+      const [a, b] = nextFlipped;
+      const termA = deck.find((c) => c.id === a)?.term;
+      const termB = deck.find((c) => c.id === b)?.term;
+      if (termA && termA === termB) {
+        setMatched((m) => [...m, termA]);
+        setFlipped([]);
+      } else {
+        busy.current = true;
+        setTimeout(() => {
+          setFlipped([]);
+          busy.current = false;
+        }, 900);
+      }
+    }
+  }
+
+  return (
+    <View style={styles.stack}>
+      <GameHeader title="Memory Match" onBack={onBack} />
+      <Text style={styles.gameCounter}>Find the matching pairs · {moves} move{moves === 1 ? '' : 's'}</Text>
+      <View style={styles.memGrid}>
+        {deck.map((card) => {
+          const show = flipped.includes(card.id) || matched.includes(card.term);
+          const done = matched.includes(card.term);
+          return (
+            <PressableScale
+              key={card.id}
+              style={[styles.memCard, show && styles.memCardUp, done && styles.memCardDone]}
+              onPress={() => tap(card)}
+              pressedScale={0.92}
+              accessibilityLabel={show ? card.term : 'hidden card'}
+            >
+              {show ? (
+                <Text style={[styles.memCardText, done && { color: theme.colors.onBrand }]}>{card.term}</Text>
+              ) : (
+                <ShieldCheck size={theme.icon(28)} color={theme.colors.faint} strokeWidth={2} />
+              )}
+            </PressableScale>
+          );
+        })}
+      </View>
+      {allDone ? (
+        <View style={styles.gameWin}>
+          <CheckCircle2 size={theme.icon(24)} color={theme.colors.low} strokeWidth={2.2} />
+          <Text style={styles.gameWinText}>All pairs found in {moves} moves!</Text>
+        </View>
+      ) : null}
+    </View>
+  );
+}
 
 function makeStyles(t: Theme) {
   return StyleSheet.create({
@@ -1969,6 +3271,7 @@ function makeStyles(t: Theme) {
       fontSize: t.font('body'),
       color: t.colors.ink,
       minHeight: t.tap(54),
+      fontFamily: 'PlusJakartaSans_500Medium',
     },
     textArea: {
       backgroundColor: t.colors.surface,
@@ -1980,6 +3283,7 @@ function makeStyles(t: Theme) {
       lineHeight: t.lineHeight('body'),
       color: t.colors.ink,
       minHeight: t.tap(140),
+      fontFamily: 'PlusJakartaSans_500Medium',
     },
     textAreaSmall: {
       backgroundColor: t.colors.surface,
@@ -1991,6 +3295,7 @@ function makeStyles(t: Theme) {
       lineHeight: t.lineHeight('bodySm'),
       color: t.colors.ink,
       minHeight: t.tap(92),
+      fontFamily: 'PlusJakartaSans_500Medium',
     },
 
     buttonRow: { flexDirection: 'row', gap: t.space.sm },
@@ -2124,12 +3429,12 @@ function makeStyles(t: Theme) {
       backgroundColor: t.colors.surface,
       borderTopWidth: 1,
       borderTopColor: t.colors.line,
-      paddingTop: t.space.sm,
-      paddingBottom: Platform.OS === 'ios' ? 28 : t.space.md,
+      paddingTop: t.space.md,
+      paddingBottom: Platform.OS === 'ios' ? 30 : t.space.lg,
       paddingHorizontal: t.space.sm,
     },
-    navItem: { flex: 1, alignItems: 'center', gap: 4 },
-    navIconWrap: { width: t.tap(54), height: t.tap(34), borderRadius: t.radius.pill, alignItems: 'center', justifyContent: 'center' },
+    navItem: { flex: 1, alignItems: 'center', gap: 6, paddingVertical: 2 },
+    navIconWrap: { width: t.tap(66), height: t.tap(44), borderRadius: t.radius.pill, alignItems: 'center', justifyContent: 'center' },
     navIconWrapActive: { backgroundColor: t.colors.brandTint },
     navBadge: {
       position: 'absolute',
@@ -2146,8 +3451,236 @@ function makeStyles(t: Theme) {
       borderColor: t.colors.surface,
     },
     navBadgeText: { fontSize: 10, fontWeight: t.weight.bold, color: t.colors.white },
-    navLabel: { fontSize: t.font('tiny'), fontWeight: t.weight.medium, color: t.colors.muted },
+    navLabel: { fontSize: t.font('label'), fontWeight: t.weight.semibold, color: t.colors.muted },
     navLabelActive: { color: t.colors.brand, fontWeight: t.weight.bold },
+
+    // Home ------------------------------------------------------------------
+    homeStack: { gap: t.space.xl },
+    homeSectionTitle: { fontSize: t.font('h2'), fontWeight: t.weight.bold, color: t.colors.ink, letterSpacing: -0.4 },
+    homeGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', rowGap: t.space.md },
+    homeTileWrap: { width: '48%' },
+    homeTile: {
+      width: '100%',
+      backgroundColor: t.colors.surface,
+      borderRadius: t.radius.lg,
+      borderWidth: 1,
+      borderColor: t.colors.line,
+      paddingVertical: t.space.lg,
+      paddingHorizontal: t.space.md,
+      alignItems: 'center',
+      gap: 6,
+      ...t.shadow('soft'),
+    },
+    homeTileIcon: { width: t.tap(66), height: t.tap(66), borderRadius: t.radius.pill, alignItems: 'center', justifyContent: 'center', marginBottom: 2 },
+    homeTileTitle: { fontSize: t.font('body'), fontWeight: t.weight.bold, color: t.colors.ink, textAlign: 'center' },
+    homeTileDetail: { fontSize: t.font('label'), color: t.colors.muted, fontWeight: t.weight.medium, textAlign: 'center' },
+    lessonCta: { flexDirection: 'row', alignItems: 'center', gap: t.space.md, backgroundColor: t.colors.brand, borderRadius: t.radius.lg, padding: t.space.lg, ...t.shadow('card') },
+    lessonCtaIcon: { width: t.tap(54), height: t.tap(54), borderRadius: t.radius.md, backgroundColor: 'rgba(255,255,255,0.18)', alignItems: 'center', justifyContent: 'center' },
+    lessonCtaEyebrow: { fontSize: t.font('label'), fontWeight: t.weight.semibold, color: 'rgba(255,255,255,0.85)' },
+    lessonCtaTitle: { fontSize: t.font('h3'), fontWeight: t.weight.bold, color: t.colors.onBrand, letterSpacing: -0.2, marginTop: 1 },
+
+    // Checks ----------------------------------------------------------------
+    checksStack: { gap: t.space.xxl },
+    checkGroup: { gap: t.space.md },
+    checkGroupHeader: { flexDirection: 'row', alignItems: 'center', gap: t.space.md },
+    checkGroupIcon: { width: t.tap(46), height: t.tap(46), borderRadius: t.radius.sm, backgroundColor: t.colors.brandTint, alignItems: 'center', justifyContent: 'center' },
+    checkGroupTitle: { fontSize: t.font('h2'), fontWeight: t.weight.bold, color: t.colors.ink, letterSpacing: -0.4 },
+    checkGroupSubtitle: { fontSize: t.font('label'), color: t.colors.muted, fontWeight: t.weight.medium, marginTop: 1 },
+    checkGroupBody: { backgroundColor: t.colors.surface, borderRadius: t.radius.lg, borderWidth: 1, borderColor: t.colors.line, overflow: 'hidden', ...t.shadow('soft') },
+    toolRow: { flexDirection: 'row', alignItems: 'center', gap: t.space.md, paddingVertical: t.space.md, paddingHorizontal: t.space.lg, minHeight: t.tap(74) },
+    toolRowDivider: { borderBottomWidth: 1, borderBottomColor: t.colors.line },
+    toolRowIcon: { width: t.tap(50), height: t.tap(50), borderRadius: t.radius.sm, alignItems: 'center', justifyContent: 'center' },
+    toolRowTitle: { fontSize: t.font('body'), fontWeight: t.weight.semibold, color: t.colors.ink },
+    toolRowDetail: { fontSize: t.font('label'), color: t.colors.muted, fontWeight: t.weight.medium, marginTop: 1 },
+
+    // Learn list ------------------------------------------------------------
+    learnStack: { gap: t.space.lg },
+    weekRow: { flexDirection: 'row', alignItems: 'center', gap: t.space.md, backgroundColor: t.colors.surface, borderRadius: t.radius.lg, borderWidth: 1, borderColor: t.colors.line, padding: t.space.lg, minHeight: t.tap(78), ...t.shadow('soft') },
+    weekRowLocked: { backgroundColor: t.colors.surfaceMuted },
+    weekLocked: { fontSize: t.font('label'), color: t.colors.muted, fontWeight: t.weight.semibold, marginTop: 3 },
+
+    // Full-screen lesson ----------------------------------------------------
+    lessonStack: { gap: t.space.xl, paddingBottom: t.space.lg },
+    lessonEyebrow: { fontSize: t.font('label'), fontWeight: t.weight.bold, color: t.colors.brand, textTransform: 'uppercase', letterSpacing: 0.6 },
+    lessonTitle: { fontSize: t.font('h1'), fontWeight: t.weight.bold, color: t.colors.ink, letterSpacing: -0.5, lineHeight: t.lineHeight('h1') },
+    lessonBody: { fontSize: t.font('body'), lineHeight: t.lineHeight('body'), color: t.colors.inkSoft, fontWeight: t.weight.regular },
+    lessonKeyPoints: { gap: t.space.md, backgroundColor: t.colors.surface, borderRadius: t.radius.lg, borderWidth: 1, borderColor: t.colors.line, padding: t.space.lg, ...t.shadow('soft') },
+    lessonBullet: { flexDirection: 'row', alignItems: 'flex-start', gap: t.space.md },
+    lessonBulletText: { flex: 1, fontSize: t.font('bodySm'), lineHeight: t.lineHeight('bodySm'), color: t.colors.ink, fontWeight: t.weight.medium },
+    exampleHead: { flexDirection: 'row', alignItems: 'center', gap: t.space.sm },
+    exampleText: { fontSize: t.font('body'), lineHeight: t.lineHeight('body'), color: t.colors.ink, fontWeight: t.weight.medium, fontStyle: 'italic' },
+    rememberBox: { flexDirection: 'row', alignItems: 'center', gap: t.space.md, backgroundColor: t.colors.accentTint, borderRadius: t.radius.md, padding: t.space.lg },
+    rememberBoxText: { flex: 1, fontSize: t.font('bodySm'), lineHeight: t.lineHeight('bodySm'), color: t.colors.accent, fontWeight: t.weight.bold },
+
+    // Full-screen quiz ------------------------------------------------------
+    quizHeader: { gap: t.space.sm },
+    quizCounter: { fontSize: t.font('label'), fontWeight: t.weight.bold, color: t.colors.brand, textTransform: 'uppercase', letterSpacing: 0.6 },
+    quizPromptBig: { fontSize: t.font('h2'), fontWeight: t.weight.bold, color: t.colors.ink, lineHeight: t.lineHeight('h2'), letterSpacing: -0.3 },
+    quizOptions: { gap: t.space.md },
+    quizTrack: { height: 12, borderRadius: t.radius.pill, backgroundColor: t.colors.surfaceMuted, overflow: 'hidden' },
+    quizFill: { height: '100%', borderRadius: t.radius.pill, backgroundColor: t.colors.brand },
+
+    // Lesson result ---------------------------------------------------------
+    resultBox: { alignItems: 'center', gap: t.space.sm, backgroundColor: t.colors.surface, borderRadius: t.radius.lg, borderWidth: 1, borderColor: t.colors.line, padding: t.space.xxl, ...t.shadow('soft') },
+    resultIcon: { width: t.tap(90), height: t.tap(90), borderRadius: t.radius.pill, alignItems: 'center', justifyContent: 'center', marginBottom: t.space.xs },
+    resultScore: { fontSize: Math.round(t.font('display') * 1.15), fontWeight: t.weight.bold, color: t.colors.ink, letterSpacing: -1 },
+    resultTitle: { fontSize: t.font('h2'), fontWeight: t.weight.bold, color: t.colors.ink },
+    resultText: { fontSize: t.font('body'), lineHeight: t.lineHeight('body'), color: t.colors.inkSoft, textAlign: 'center', fontWeight: t.weight.regular },
+
+    // Walkthrough -----------------------------------------------------------
+    walkRoot: { flex: 1, backgroundColor: t.colors.bg },
+    walkTop: { flexDirection: 'row', justifyContent: 'flex-end', paddingTop: 54, paddingHorizontal: t.space.xl },
+    walkSkip: { padding: t.space.sm },
+    walkSkipText: { fontSize: t.font('bodySm'), fontWeight: t.weight.semibold, color: t.colors.muted },
+    walkBody: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: t.space.xl, gap: t.space.lg },
+    walkIcon: { width: t.tap(108), height: t.tap(108), borderRadius: t.radius.pill, backgroundColor: t.colors.brand, alignItems: 'center', justifyContent: 'center', ...t.shadow('card') },
+    walkTitle: { fontSize: t.font('h1'), fontWeight: t.weight.bold, color: t.colors.ink, textAlign: 'center', letterSpacing: -0.5 },
+    walkText: { fontSize: t.font('body'), lineHeight: t.lineHeight('body'), color: t.colors.inkSoft, textAlign: 'center', fontWeight: t.weight.regular },
+    walkDots: { flexDirection: 'row', gap: 8, marginTop: t.space.sm },
+    walkDot: { width: 9, height: 9, borderRadius: 5, backgroundColor: t.colors.lineStrong },
+    walkDotActive: { width: 24, backgroundColor: t.colors.brand },
+    walkFooter: { padding: t.space.xl, paddingBottom: 34 },
+
+    // Header actions --------------------------------------------------------
+    homeHeaderRow: { flexDirection: 'row', alignItems: 'center', gap: t.space.md },
+    headerTopRow: { flexDirection: 'row', alignItems: 'flex-start', gap: t.space.sm },
+    headerIconBtn: { width: t.tap(46), height: t.tap(46), borderRadius: t.radius.pill, backgroundColor: t.colors.surfaceMuted, alignItems: 'center', justifyContent: 'center' },
+    headerBadge: {
+      position: 'absolute',
+      top: 4,
+      right: 4,
+      minWidth: 18,
+      height: 18,
+      borderRadius: 9,
+      paddingHorizontal: 4,
+      backgroundColor: t.colors.danger,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderWidth: 1.5,
+      borderColor: t.colors.surface,
+    },
+    headerBadgeText: { fontSize: 10, fontWeight: t.weight.bold, color: t.colors.white },
+
+    // Emergency page --------------------------------------------------------
+    emergencyHero: { alignItems: 'center', gap: t.space.sm, backgroundColor: t.colors.danger, borderRadius: t.radius.lg, padding: t.space.xl, ...t.shadow('card') },
+    emergencyHeroIcon: { width: t.tap(72), height: t.tap(72), borderRadius: t.radius.pill, backgroundColor: 'rgba(255,255,255,0.18)', alignItems: 'center', justifyContent: 'center', marginBottom: 2 },
+    emergencyHeroTitle: { fontSize: t.font('h1'), fontWeight: t.weight.bold, color: t.colors.onBrand, textAlign: 'center', letterSpacing: -0.4 },
+    emergencyHeroText: { fontSize: t.font('body'), lineHeight: t.lineHeight('body'), color: 'rgba(255,255,255,0.92)', textAlign: 'center', fontWeight: t.weight.medium },
+    emergencySectionTitle: { fontSize: t.font('h3'), fontWeight: t.weight.bold, color: t.colors.ink, letterSpacing: -0.3, marginTop: t.space.xs },
+    dontList: { backgroundColor: t.colors.surface, borderRadius: t.radius.lg, borderWidth: 1, borderColor: t.colors.dangerBorder, overflow: 'hidden', ...t.shadow('soft') },
+    dontRow: { flexDirection: 'row', alignItems: 'center', gap: t.space.md, padding: t.space.lg },
+    dontRowDivider: { borderBottomWidth: 1, borderBottomColor: t.colors.line },
+    dontIcon: { width: t.tap(48), height: t.tap(48), borderRadius: t.radius.sm, backgroundColor: t.colors.dangerTint, alignItems: 'center', justifyContent: 'center' },
+    dontText: { flex: 1, fontSize: t.font('bodySm'), lineHeight: t.lineHeight('bodySm'), color: t.colors.ink, fontWeight: t.weight.semibold },
+    emergencyInfo: { flexDirection: 'row', alignItems: 'center', gap: t.space.md, backgroundColor: t.colors.brandTint, borderRadius: t.radius.md, padding: t.space.lg },
+    emergencyInfoText: { flex: 1, fontSize: t.font('bodySm'), lineHeight: t.lineHeight('bodySm'), color: t.colors.ink, fontWeight: t.weight.medium },
+
+    // About Us --------------------------------------------------------------
+    aboutHeroWrap: { alignItems: 'center', gap: t.space.xs, marginBottom: t.space.sm },
+    aboutLogo: { width: t.tap(84), height: t.tap(84), borderRadius: t.radius.lg, backgroundColor: t.colors.brand, alignItems: 'center', justifyContent: 'center', marginBottom: t.space.xs, ...t.shadow('card') },
+    aboutTitle: { fontSize: t.font('h1'), fontWeight: t.weight.bold, color: t.colors.ink, letterSpacing: -0.4 },
+    aboutTagline: { fontSize: t.font('bodySm'), color: t.colors.muted, fontWeight: t.weight.semibold },
+
+    // Games -----------------------------------------------------------------
+    gameCard: { flexDirection: 'row', alignItems: 'center', gap: t.space.md, backgroundColor: t.colors.surface, borderRadius: t.radius.lg, borderWidth: 1, borderColor: t.colors.line, padding: t.space.lg, minHeight: t.tap(80), ...t.shadow('soft') },
+    gameIcon: { width: t.tap(56), height: t.tap(56), borderRadius: t.radius.md, backgroundColor: t.colors.brandTint, alignItems: 'center', justifyContent: 'center' },
+    gameTitle: { fontSize: t.font('h3'), fontWeight: t.weight.bold, color: t.colors.ink, letterSpacing: -0.2 },
+    gameDetail: { fontSize: t.font('label'), color: t.colors.muted, fontWeight: t.weight.medium, marginTop: 2 },
+    gameBack: { flexDirection: 'row', alignItems: 'center', gap: 2, alignSelf: 'flex-start' },
+    gameBackText: { fontSize: t.font('bodySm'), fontWeight: t.weight.semibold, color: t.colors.brand },
+    gameHeading: { fontSize: t.font('h1'), fontWeight: t.weight.bold, color: t.colors.ink, letterSpacing: -0.4 },
+    hintBox: { backgroundColor: t.colors.surfaceMuted, borderRadius: t.radius.md, borderWidth: 1, borderColor: t.colors.line, padding: t.space.lg, gap: 4 },
+    hintLabel: { fontSize: t.font('tiny'), fontWeight: t.weight.bold, color: t.colors.muted, textTransform: 'uppercase', letterSpacing: 0.8 },
+    hintText: { fontSize: t.font('body'), lineHeight: t.lineHeight('body'), color: t.colors.ink, fontWeight: t.weight.medium },
+    answerRow: { flexDirection: 'row', flexWrap: 'wrap', gap: t.space.sm, justifyContent: 'center' },
+    answerSlot: { minWidth: t.tap(40), height: t.tap(52), paddingHorizontal: 6, borderRadius: t.radius.sm, borderWidth: 2, borderColor: t.colors.lineStrong, backgroundColor: t.colors.surface, alignItems: 'center', justifyContent: 'center' },
+    answerSlotSolved: { borderColor: t.colors.low, backgroundColor: t.colors.lowTint },
+    answerSlotWrong: { borderColor: t.colors.danger, backgroundColor: t.colors.dangerTint },
+    answerSlotText: { fontSize: t.font('h2'), fontWeight: t.weight.bold, color: t.colors.ink },
+    tileRow: { flexDirection: 'row', flexWrap: 'wrap', gap: t.space.sm, justifyContent: 'center' },
+    letterTile: { width: t.tap(52), height: t.tap(52), borderRadius: t.radius.sm, backgroundColor: t.colors.brand, alignItems: 'center', justifyContent: 'center', ...t.shadow('soft') },
+    letterTileUsed: { backgroundColor: t.colors.surfaceMuted },
+    letterText: { fontSize: t.font('h2'), fontWeight: t.weight.bold, color: t.colors.onBrand },
+    gameWin: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: t.space.sm, backgroundColor: t.colors.lowTint, borderRadius: t.radius.md, borderWidth: 1, borderColor: t.colors.low, padding: t.space.lg },
+    gameWinText: { fontSize: t.font('h3'), fontWeight: t.weight.bold, color: t.colors.low },
+    matchGrid: { flexDirection: 'row', gap: t.space.md },
+    matchCol: { flex: 1, gap: t.space.md },
+    matchChip: { minHeight: t.tap(70), borderRadius: t.radius.md, borderWidth: 1.5, borderColor: t.colors.line, backgroundColor: t.colors.surface, alignItems: 'center', justifyContent: 'center', paddingHorizontal: t.space.md, paddingVertical: t.space.sm },
+    matchMeaning: {},
+    matchChipSel: { borderColor: t.colors.brand, backgroundColor: t.colors.brandTintSoft },
+    matchChipDone: { borderColor: t.colors.low, backgroundColor: t.colors.low },
+    matchChipWrong: { borderColor: t.colors.danger, backgroundColor: t.colors.dangerTint },
+    matchChipText: { fontSize: t.font('bodySm'), fontWeight: t.weight.bold, color: t.colors.ink, textAlign: 'center' },
+    matchMeaningText: { fontSize: t.font('label'), fontWeight: t.weight.medium, color: t.colors.ink, textAlign: 'center', lineHeight: t.lineHeight('label') },
+
+    // Streak + game hub -----------------------------------------------------
+    streakBanner: { flexDirection: 'row', alignItems: 'center', gap: t.space.md, backgroundColor: t.colors.brand, borderRadius: t.radius.lg, padding: t.space.lg, ...t.shadow('card') },
+    streakFlame: { width: t.tap(52), height: t.tap(52), borderRadius: t.radius.pill, backgroundColor: 'rgba(255,255,255,0.18)', alignItems: 'center', justifyContent: 'center' },
+    streakNumber: { fontSize: t.font('h2'), fontWeight: t.weight.bold, color: t.colors.onBrand, letterSpacing: -0.3 },
+    streakSub: { fontSize: t.font('label'), color: 'rgba(255,255,255,0.9)', fontWeight: t.weight.medium, marginTop: 1 },
+    homeStreakChip: { flexDirection: 'row', alignItems: 'center', gap: t.space.md, backgroundColor: t.colors.brandTint, borderRadius: t.radius.md, borderWidth: 1, borderColor: t.colors.brandTintSoft, paddingVertical: t.space.md, paddingHorizontal: t.space.lg },
+    homeStreakIcon: { width: t.tap(38), height: t.tap(38), borderRadius: t.radius.pill, backgroundColor: t.colors.brand, alignItems: 'center', justifyContent: 'center' },
+    homeStreakText: { flex: 1, fontSize: t.font('bodySm'), fontWeight: t.weight.bold, color: t.colors.brandDark },
+    gameTileWrap: { width: '48%' },
+    gameTile: { backgroundColor: t.colors.surface, borderRadius: t.radius.lg, borderWidth: 1, borderColor: t.colors.line, paddingVertical: t.space.lg, paddingHorizontal: t.space.md, alignItems: 'center', gap: t.space.sm, minHeight: t.tap(128), justifyContent: 'center', ...t.shadow('soft') },
+    gameTileIcon: { width: t.tap(60), height: t.tap(60), borderRadius: t.radius.pill, alignItems: 'center', justifyContent: 'center' },
+    gameTileTitle: { fontSize: t.font('bodySm'), fontWeight: t.weight.bold, color: t.colors.ink, textAlign: 'center' },
+    gameCounter: { fontSize: t.font('label'), fontWeight: t.weight.bold, color: t.colors.brand, textTransform: 'uppercase', letterSpacing: 0.6 },
+
+    // Crossword -------------------------------------------------------------
+    crossGrid: { alignSelf: 'center', gap: 4 },
+    crossRow: { flexDirection: 'row', gap: 4 },
+    crossBlank: { width: t.tap(52), height: t.tap(52) },
+    crossCell: { width: t.tap(52), height: t.tap(52), borderRadius: t.radius.xs, borderWidth: 1.5, borderColor: t.colors.lineStrong, backgroundColor: t.colors.surface, alignItems: 'center', justifyContent: 'center' },
+    crossCellActive: { borderColor: t.colors.brand, backgroundColor: t.colors.brandTintSoft },
+    crossCellCorrect: { borderColor: t.colors.low, backgroundColor: t.colors.lowTint },
+    crossNum: { position: 'absolute', top: 2, left: 3, fontSize: 10, fontWeight: t.weight.bold, color: t.colors.muted },
+    crossLetter: { fontSize: t.font('h3'), fontWeight: t.weight.bold, color: t.colors.ink },
+    crossInput: { backgroundColor: t.colors.surface, borderWidth: 1.5, borderColor: t.colors.lineStrong, borderRadius: t.radius.md, paddingHorizontal: t.space.lg, minHeight: t.tap(54), fontSize: t.font('body'), color: t.colors.ink, letterSpacing: 2, textAlign: 'center', fontFamily: 'PlusJakartaSans_700Bold' },
+    clueRow: { backgroundColor: t.colors.surface, borderRadius: t.radius.md, borderWidth: 1, borderColor: t.colors.line, padding: t.space.md, gap: 2 },
+    clueRowActive: { borderColor: t.colors.brand, backgroundColor: t.colors.brandTintSoft },
+    clueNum: { fontSize: t.font('tiny'), fontWeight: t.weight.bold, color: t.colors.brand, textTransform: 'uppercase', letterSpacing: 0.6 },
+    clueText: { fontSize: t.font('bodySm'), fontWeight: t.weight.medium, color: t.colors.ink, lineHeight: t.lineHeight('bodySm') },
+
+    // True/False, Red Flag --------------------------------------------------
+    tfCard: { backgroundColor: t.colors.surface, borderRadius: t.radius.lg, borderWidth: 1, borderColor: t.colors.line, padding: t.space.xl, ...t.shadow('soft') },
+    tfStatement: { fontSize: t.font('h3'), fontWeight: t.weight.semibold, color: t.colors.ink, lineHeight: t.lineHeight('h3') },
+    tfButtons: { flexDirection: 'row', gap: t.space.md },
+    tfBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: t.space.sm, minHeight: t.tap(64), borderRadius: t.radius.md, borderWidth: 1.5, borderColor: t.colors.line, backgroundColor: t.colors.surface },
+    tfBtnCorrect: { borderColor: t.colors.low, backgroundColor: t.colors.lowTint },
+    tfBtnWrong: { borderColor: t.colors.danger, backgroundColor: t.colors.dangerTint },
+    tfBtnText: { fontSize: t.font('body'), fontWeight: t.weight.bold, color: t.colors.ink },
+    rfCard: { backgroundColor: t.colors.surface, borderRadius: t.radius.lg, borderWidth: 1, borderColor: t.colors.line, padding: t.space.xl, minHeight: t.tap(120), justifyContent: 'center', ...t.shadow('soft') },
+    rfText: { fontSize: t.font('h3'), fontWeight: t.weight.medium, color: t.colors.ink, lineHeight: t.lineHeight('h3'), textAlign: 'center' },
+
+    // Fill the blank --------------------------------------------------------
+    fillSentence: { fontSize: t.font('h3'), fontWeight: t.weight.medium, color: t.colors.ink, lineHeight: t.lineHeight('h2') },
+    fillBlankMark: { fontWeight: t.weight.bold, color: t.colors.brand },
+    fillOption: { flexDirection: 'row', alignItems: 'center', gap: t.space.sm, minHeight: t.tap(56), borderWidth: 1.5, borderColor: t.colors.line, borderRadius: t.radius.md, backgroundColor: t.colors.surface, paddingHorizontal: t.space.lg },
+    fillOptionText: { flex: 1, fontSize: t.font('body'), fontWeight: t.weight.semibold, color: t.colors.ink },
+
+    // Memory match ----------------------------------------------------------
+    memGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: t.space.sm, justifyContent: 'center' },
+    memCard: { width: '30%', aspectRatio: 1, borderRadius: t.radius.md, borderWidth: 1.5, borderColor: t.colors.line, backgroundColor: t.colors.surfaceMuted, alignItems: 'center', justifyContent: 'center', padding: 4 },
+    memCardUp: { backgroundColor: t.colors.brandTintSoft, borderColor: t.colors.brand },
+    memCardDone: { backgroundColor: t.colors.low, borderColor: t.colors.low },
+    memCardText: { fontSize: t.font('bodySm'), fontWeight: t.weight.bold, color: t.colors.ink, textAlign: 'center' },
+
+    // Side drawer -----------------------------------------------------------
+    drawerOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: t.colors.overlay },
+    drawerPanel: { position: 'absolute', top: 0, right: 0, bottom: 0, backgroundColor: t.colors.bg, borderTopLeftRadius: t.radius.xl, borderBottomLeftRadius: t.radius.xl, ...t.shadow('raised') },
+    drawerHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: t.space.md,
+      paddingTop: 56,
+      paddingBottom: t.space.md,
+      paddingHorizontal: t.space.lg,
+      borderBottomWidth: 1,
+      borderBottomColor: t.colors.line,
+    },
+    drawerLogo: { width: t.tap(40), height: t.tap(40), borderRadius: t.radius.sm, backgroundColor: t.colors.brand, alignItems: 'center', justifyContent: 'center' },
+    drawerTitle: { flex: 1, fontSize: t.font('h2'), fontWeight: t.weight.bold, color: t.colors.ink, letterSpacing: -0.3 },
 
     modalScreen: { flex: 1, backgroundColor: t.colors.bg },
     modalHeader: {

@@ -61,6 +61,7 @@ const ONBOARDING_KEY = 'shield.onboarding.v1';
 const PROGRESS_KEY = 'shield.progress.v1';
 const DETECTIONS_KEY = 'shield.detections.v1';
 const SURVEY_KEY = 'shield.survey.v1';
+const WALKTHROUGH_KEY = 'shield.walkthrough.v1';
 
 export const defaultPreferences: Preferences = {
   theme: 'system',
@@ -68,6 +69,7 @@ export const defaultPreferences: Preferences = {
   alertSensitivity: 'balanced',
   learningFrequency: 'weekly',
   difficulty: 'beginner',
+  aiResponseStyle: 'balanced',
   accessibility: {
     textSize: 'default',
     iconSize: 'default',
@@ -84,7 +86,34 @@ export const defaultProgress: LearningProgress = {
   completedWeeks: [],
   quizScores: {},
   lastActivity: '',
+  streak: 0,
+  streakWeek: 0,
+  bestStreak: 0,
 };
+
+/** Week index since the Unix epoch (used for weekly streak math). */
+export function currentWeekIndex(now: Date = new Date()): number {
+  return Math.floor(now.getTime() / (7 * 24 * 60 * 60 * 1000));
+}
+
+/**
+ * Given the stored progress, return an updated streak after activity today.
+ * - Same week as last activity: unchanged.
+ * - Exactly the next week: +1.
+ * - Otherwise (gap or first ever): reset to 1.
+ */
+export function advanceStreak(progress: LearningProgress, now: Date = new Date()): LearningProgress {
+  const week = currentWeekIndex(now);
+  if (progress.streak > 0 && progress.streakWeek === week) return progress;
+  const streak = progress.streak > 0 && progress.streakWeek === week - 1 ? progress.streak + 1 : 1;
+  return {
+    ...progress,
+    streak,
+    streakWeek: week,
+    bestStreak: Math.max(progress.bestStreak ?? 0, streak),
+    lastActivity: now.toISOString(),
+  };
+}
 
 export async function loadPreferences(): Promise<Preferences> {
   const raw = await AsyncStorage.getItem(PREFS_KEY);
@@ -161,6 +190,14 @@ export async function addDetection(event: DetectionEvent): Promise<DetectionEven
   return next;
 }
 
+export async function loadWalkthroughSeen(): Promise<boolean> {
+  return (await AsyncStorage.getItem(WALKTHROUGH_KEY)) === 'true';
+}
+
+export async function saveWalkthroughSeen(seen: boolean) {
+  await AsyncStorage.setItem(WALKTHROUGH_KEY, seen ? 'true' : 'false');
+}
+
 export async function clearAllData() {
   await AsyncStorage.multiRemove([
     CONTACTS_KEY,
@@ -172,5 +209,6 @@ export async function clearAllData() {
     PROGRESS_KEY,
     DETECTIONS_KEY,
     SURVEY_KEY,
+    WALKTHROUGH_KEY,
   ]);
 }

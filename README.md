@@ -1,4 +1,4 @@
-# Shield Our Elders Android App
+# Shield Our Elders Mobile App
 
 Shield Our Elders is a mobile scam-safety app designed for older adults and the trusted people who support them. The app helps users slow down during suspicious calls, texts, emails, QR codes, payment requests, and voicemail messages. Instead of giving a vague warning, it shows plain-language red flags and simple next steps, such as hanging up, avoiding links, not sending money, and calling a trusted contact or an official company number.
 
@@ -30,6 +30,19 @@ npx expo start
 ```
 
 For Android emulator testing, open the Expo URL in Expo Go or run the app through Android Studio/Expo tooling.
+
+For iOS simulator testing, install Xcode, accept the Xcode license, then run:
+
+```bash
+npm run ios
+```
+
+To generate the native iOS project locally for an Xcode build, run:
+
+```bash
+npm run prebuild:ios
+npm run run:ios
+```
 
 ## Optional Model Checks
 

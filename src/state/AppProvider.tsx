@@ -11,6 +11,7 @@ import {
   UserProfile,
 } from '../types/app';
 import {
+  advanceStreak,
   clearAllData,
   defaultPreferences,
   defaultProgress,
@@ -20,12 +21,14 @@ import {
   loadProfile,
   loadProgress,
   loadSurvey,
+  loadWalkthroughSeen,
   saveDetections,
   saveOnboardingComplete,
   savePreferences,
   saveProfile,
   saveProgress,
   saveSurvey,
+  saveWalkthroughSeen,
 } from '../services/storage';
 import { buildTheme, Theme, ThemeMode } from '../theme/tokens';
 
@@ -50,9 +53,12 @@ interface AppContextValue {
   completeOnboarding: (data: { profile: UserProfile; prefs: Preferences; survey: CapabilitySurvey | null }) => void;
   updateProfile: (profile: UserProfile) => void;
   updateProgress: (progress: LearningProgress) => void;
+  recordStreak: () => void;
   pushDetection: (event: DetectionEvent) => void;
   markAllDetectionsRead: () => void;
   clearDetections: () => void;
+  walkthroughSeen: boolean;
+  markWalkthroughSeen: () => void;
   resetAll: () => void;
 }
 
@@ -67,16 +73,18 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [progress, setProgressState] = useState<LearningProgress>(defaultProgress);
   const [detections, setDetectionsState] = useState<DetectionEvent[]>([]);
   const [onboardingComplete, setOnboardingComplete] = useState(false);
+  const [walkthroughSeen, setWalkthroughSeen] = useState(true);
 
   useEffect(() => {
     (async () => {
-      const [p, pr, sv, pg, dt, ob] = await Promise.all([
+      const [p, pr, sv, pg, dt, ob, wt] = await Promise.all([
         loadProfile(),
         loadPreferences(),
         loadSurvey(),
         loadProgress(),
         loadDetections(),
         loadOnboardingComplete(),
+        loadWalkthroughSeen(),
       ]);
       setProfileState(p);
       setPrefsState(pr);
@@ -84,6 +92,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       setProgressState(pg);
       setDetectionsState(dt);
       setOnboardingComplete(ob);
+      setWalkthroughSeen(wt);
       setReady(true);
     })();
   }, []);
@@ -125,13 +134,20 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       setPrefsState(data.prefs);
       setSurveyState(data.survey);
       setOnboardingComplete(true);
+      setWalkthroughSeen(false); // show the feature walkthrough + first lesson next
       saveProfile(data.profile);
       savePreferences(data.prefs);
       if (data.survey) saveSurvey(data.survey);
       saveOnboardingComplete(true);
+      saveWalkthroughSeen(false);
     },
     [],
   );
+
+  const markWalkthroughSeen = useCallback(() => {
+    setWalkthroughSeen(true);
+    saveWalkthroughSeen(true);
+  }, []);
 
   const updateProfile = useCallback((next: UserProfile) => {
     setProfileState(next);
@@ -141,6 +157,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const updateProgress = useCallback((next: LearningProgress) => {
     setProgressState(next);
     saveProgress(next);
+  }, []);
+
+  const recordStreak = useCallback(() => {
+    setProgressState((current) => {
+      const next = advanceStreak(current);
+      if (next !== current) saveProgress(next);
+      return next;
+    });
   }, []);
 
   const pushDetection = useCallback((event: DetectionEvent) => {
@@ -172,6 +196,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setProgressState(defaultProgress);
     setDetectionsState([]);
     setOnboardingComplete(false);
+    setWalkthroughSeen(true);
   }, []);
 
   const unreadCount = useMemo(() => detections.filter((event) => !event.read).length, [detections]);
@@ -191,9 +216,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     completeOnboarding,
     updateProfile,
     updateProgress,
+    recordStreak,
     pushDetection,
     markAllDetectionsRead,
     clearDetections,
+    walkthroughSeen,
+    markWalkthroughSeen,
     resetAll,
   };
 

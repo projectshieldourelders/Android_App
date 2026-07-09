@@ -104,6 +104,8 @@ export type NotificationCadence = 'off' | 'weekly' | 'biweekly';
 export type AlertSensitivity = 'low' | 'balanced' | 'high';
 export type LearningFrequency = 'off' | 'weekly' | 'biweekly';
 export type Difficulty = 'beginner' | 'intermediate' | 'advanced';
+// How the user wants AI/analysis explanations written.
+export type AiResponseStyle = 'simple' | 'balanced' | 'detailed';
 
 export interface AccessibilityPrefs {
   textSize: ScalePref;
@@ -121,6 +123,7 @@ export interface Preferences {
   alertSensitivity: AlertSensitivity;
   learningFrequency: LearningFrequency;
   difficulty: Difficulty;
+  aiResponseStyle: AiResponseStyle;
   accessibility: AccessibilityPrefs;
 }
 
@@ -144,6 +147,12 @@ export interface LearningProgress {
   completedWeeks: string[];
   quizScores: Record<string, number>;
   lastActivity: string;
+  // Weekly play streak: number of consecutive weeks with activity.
+  streak: number;
+  // The week index (weeks since epoch) of the most recent streak activity.
+  streakWeek: number;
+  // Best streak achieved, for a little extra motivation.
+  bestStreak: number;
 }
 
 export type DetectionKind = 'call' | 'message' | 'email' | 'link' | 'payment' | 'summary' | 'lesson';
@@ -169,6 +178,13 @@ export interface CallRiskResult {
   uncertain: boolean;
 }
 
+export interface QuizQuestion {
+  prompt: string;
+  options: string[];
+  answerIndex: number;
+  whyCorrect: string;
+}
+
 export interface WeeklyModule {
   id: string;
   week: number;
@@ -182,11 +198,6 @@ export interface WeeklyModule {
     message: string;
   };
   explanation: string;
-  quiz: {
-    prompt: string;
-    options: string[];
-    answerIndex: number;
-    whyCorrect: string;
-  };
+  quiz: QuizQuestion[];
   remember: string;
 }

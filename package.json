@@ -3,10 +3,12 @@
   "version": "1.0.0",
   "main": "index.ts",
   "dependencies": {
+    "@expo-google-fonts/plus-jakarta-sans": "^0.4.2",
     "@react-native-async-storage/async-storage": "2.2.0",
     "expo": "~57.0.4",
     "expo-camera": "~57.0.1",
     "expo-document-picker": "~57.0.0",
+    "expo-font": "~57.0.0",
     "expo-image-picker": "~57.0.2",
     "expo-linking": "~57.0.2",
     "expo-notifications": "~57.0.3",
@@ -28,6 +30,9 @@
     "start": "expo start",
     "android": "expo start --android",
     "ios": "expo start --ios",
+    "run:android": "expo run:android",
+    "run:ios": "expo run:ios",
+    "prebuild:ios": "expo prebuild --platform ios",
     "web": "expo start --web",
     "typecheck": "tsc --noEmit",
     "test:scams": "tsx scripts/test-scam-analyzer.ts"

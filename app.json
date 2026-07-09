@@ -2,6 +2,7 @@
   "expo": {
     "name": "Shield Our Elders",
     "slug": "shield-our-elders",
+    "scheme": "shieldourelders",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -13,6 +14,8 @@
         "expo-camera",
         {
           "cameraPermission": "Allow Shield Our Elders to scan QR codes so you can check links before opening them.",
+          "microphonePermission": "Allow Shield Our Elders to use the microphone only if you choose an audio safety check.",
+          "recordAudioAndroid": false,
           "barcodeScannerEnabled": true
         }
       ],
@@ -21,10 +24,19 @@
         {
           "photosPermission": "Allow Shield Our Elders to attach screenshots you choose for a safety check."
         }
-      ]
+      ],
+      "expo-font"
     ],
     "ios": {
-      "supportsTablet": true
+      "bundleIdentifier": "org.projectshield.elders",
+      "buildNumber": "1",
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSCameraUsageDescription": "Allow Shield Our Elders to scan QR codes so you can check links before opening them.",
+        "NSMicrophoneUsageDescription": "Allow Shield Our Elders to use the microphone only if you choose an audio safety check.",
+        "NSPhotoLibraryUsageDescription": "Allow Shield Our Elders to attach screenshots you choose for a safety check.",
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "package": "org.projectshield.elders",
