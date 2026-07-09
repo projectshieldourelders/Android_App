@@ -69,8 +69,6 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
-  Text,
-  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
@@ -131,6 +129,8 @@ import {
   trueFalseItems,
 } from './src/data/games';
 import { requestAllPermissions } from './src/services/permissions';
+import { useFonts } from 'expo-font';
+import { appFonts, Text, TextInput, TextInputInstance } from './src/theme/fonts';
 import { AnimatedBar, AnimatedToggle, Btn, Card, ListRow, Pop, PressableScale, usePressScale } from './src/ui/kit';
 
 LogBox.ignoreLogs(['Cannot connect to Expo CLI']);
@@ -287,6 +287,10 @@ function normalizePhone(phone: string) {
 // ---------------------------------------------------------------------------
 
 export default function App() {
+  const [fontsLoaded] = useFonts(appFonts);
+  if (!fontsLoaded) {
+    return <View style={{ flex: 1, backgroundColor: '#F4F6F9', alignItems: 'center', justifyContent: 'center' }}><ActivityIndicator size="large" color="#16A34A" /></View>;
+  }
   return (
     <AppProvider>
       <Root />
@@ -2721,7 +2725,7 @@ function CrosswordGame({ onBack, onWin }: { onBack: () => void; onWin: () => voi
   const theme = useTheme();
   const styles = useMemo(() => makeStyles(theme), [theme]);
   const { solution, numberAt, cellsForClue } = useMemo(() => buildCrossword(), []);
-  const inputRef = useRef<TextInput>(null);
+  const inputRef = useRef<TextInputInstance>(null);
   const [cells, setCells] = useState<Record<string, string>>({});
   const [activeIdx, setActiveIdx] = useState(0);
 
@@ -3267,6 +3271,7 @@ function makeStyles(t: Theme) {
       fontSize: t.font('body'),
       color: t.colors.ink,
       minHeight: t.tap(54),
+      fontFamily: 'PlusJakartaSans_500Medium',
     },
     textArea: {
       backgroundColor: t.colors.surface,
@@ -3278,6 +3283,7 @@ function makeStyles(t: Theme) {
       lineHeight: t.lineHeight('body'),
       color: t.colors.ink,
       minHeight: t.tap(140),
+      fontFamily: 'PlusJakartaSans_500Medium',
     },
     textAreaSmall: {
       backgroundColor: t.colors.surface,
@@ -3289,6 +3295,7 @@ function makeStyles(t: Theme) {
       lineHeight: t.lineHeight('bodySm'),
       color: t.colors.ink,
       minHeight: t.tap(92),
+      fontFamily: 'PlusJakartaSans_500Medium',
     },
 
     buttonRow: { flexDirection: 'row', gap: t.space.sm },
@@ -3629,7 +3636,7 @@ function makeStyles(t: Theme) {
     crossCellCorrect: { borderColor: t.colors.low, backgroundColor: t.colors.lowTint },
     crossNum: { position: 'absolute', top: 2, left: 3, fontSize: 10, fontWeight: t.weight.bold, color: t.colors.muted },
     crossLetter: { fontSize: t.font('h3'), fontWeight: t.weight.bold, color: t.colors.ink },
-    crossInput: { backgroundColor: t.colors.surface, borderWidth: 1.5, borderColor: t.colors.lineStrong, borderRadius: t.radius.md, paddingHorizontal: t.space.lg, minHeight: t.tap(54), fontSize: t.font('body'), color: t.colors.ink, letterSpacing: 2, textAlign: 'center' },
+    crossInput: { backgroundColor: t.colors.surface, borderWidth: 1.5, borderColor: t.colors.lineStrong, borderRadius: t.radius.md, paddingHorizontal: t.space.lg, minHeight: t.tap(54), fontSize: t.font('body'), color: t.colors.ink, letterSpacing: 2, textAlign: 'center', fontFamily: 'PlusJakartaSans_700Bold' },
     clueRow: { backgroundColor: t.colors.surface, borderRadius: t.radius.md, borderWidth: 1, borderColor: t.colors.line, padding: t.space.md, gap: 2 },
     clueRowActive: { borderColor: t.colors.brand, backgroundColor: t.colors.brandTintSoft },
     clueNum: { fontSize: t.font('tiny'), fontWeight: t.weight.bold, color: t.colors.brand, textTransform: 'uppercase', letterSpacing: 0.6 },

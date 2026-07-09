@@ -24,7 +24,8 @@
         {
           "photosPermission": "Allow Shield Our Elders to attach screenshots you choose for a safety check."
         }
-      ]
+      ],
+      "expo-font"
     ],
     "ios": {
       "bundleIdentifier": "org.projectshield.elders",

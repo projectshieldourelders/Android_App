@@ -9,14 +9,13 @@ import {
   Pressable,
   StyleProp,
   StyleSheet,
-  Text,
-  TextInput,
   TouchableOpacity,
   View,
   ViewStyle,
 } from 'react-native';
 
 import { useTheme } from '../state/AppProvider';
+import { Text, TextInput } from '../theme/fonts';
 import { Theme } from '../theme/tokens';
 
 // ---------------------------------------------------------------------------
@@ -619,6 +618,7 @@ function makeKit(t: Theme) {
       borderRadius: t.radius.md,
       paddingHorizontal: t.space.lg,
       color: t.colors.ink,
+      fontFamily: 'PlusJakartaSans_500Medium',
     },
     listRow: {
       flexDirection: 'row',
