@@ -74,7 +74,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import type { DimensionValue, ImageStyle } from 'react-native';
+import type { ImageStyle } from 'react-native';
 
 import { practiceExamples, recoverySteps, trustedContactMessage } from './src/data/content';
 import { daysUntilUnlock, isWeekUnlocked, weeklyModules } from './src/data/curriculum';
@@ -131,7 +131,7 @@ import {
   trueFalseItems,
 } from './src/data/games';
 import { requestAllPermissions } from './src/services/permissions';
-import { AnimatedToggle, Btn, Card, ListRow } from './src/ui/kit';
+import { AnimatedBar, AnimatedToggle, Btn, Card, ListRow, Pop, PressableScale, usePressScale } from './src/ui/kit';
 
 LogBox.ignoreLogs(['Cannot connect to Expo CLI']);
 
@@ -759,13 +759,13 @@ function MainApp() {
 
   function renderHeader() {
     const bell = (
-      <TouchableOpacity
+      <PressableScale
         style={styles.headerIconBtn}
         onPress={() => {
           setNotificationsVisible(true);
           markAllDetectionsRead();
         }}
-        activeOpacity={0.7}
+        pressedScale={0.9}
         accessibilityLabel={`Notifications${unreadCount ? `, ${unreadCount} new` : ''}`}
       >
         <Bell size={theme.icon(26)} color={theme.colors.ink} strokeWidth={1.9} />
@@ -774,7 +774,7 @@ function MainApp() {
             <Text style={styles.headerBadgeText}>{unreadCount > 9 ? '9+' : unreadCount}</Text>
           </View>
         ) : null}
-      </TouchableOpacity>
+      </PressableScale>
     );
 
     if (screen === 'home') {
@@ -794,9 +794,9 @@ function MainApp() {
               </Text>
             </View>
             {bell}
-            <TouchableOpacity style={styles.headerIconBtn} onPress={() => setMenuVisible(true)} activeOpacity={0.7} accessibilityLabel="Menu and settings">
+            <PressableScale style={styles.headerIconBtn} onPress={() => setMenuVisible(true)} pressedScale={0.9} accessibilityLabel="Menu and settings">
               <Menu size={theme.icon(26)} color={theme.colors.ink} strokeWidth={1.9} />
-            </TouchableOpacity>
+            </PressableScale>
           </View>
         </View>
       );
@@ -929,10 +929,10 @@ function MainApp() {
     return (
       <View style={styles.checksStack}>
         <Text style={styles.screenIntro}>What would you like to check?</Text>
-        {toolGroups.map((group) => {
+        {toolGroups.map((group, gi) => {
           const GroupIcon = group.icon;
           return (
-            <View key={group.title} style={styles.checkGroup}>
+            <Reveal key={group.title} delay={gi * 90} style={styles.checkGroup}>
               <View style={styles.checkGroupHeader}>
                 <View style={styles.checkGroupIcon}>
                   <GroupIcon size={theme.icon(22)} color={theme.colors.brand} strokeWidth={2.4} />
@@ -947,7 +947,7 @@ function MainApp() {
                   <ToolRow key={tool.screen} {...tool} last={index === group.items.length - 1} onPress={() => navigate(tool.screen)} />
                 ))}
               </View>
-            </View>
+            </Reveal>
           );
         })}
       </View>
@@ -1089,25 +1089,27 @@ function MainApp() {
     ];
     return (
       <View style={styles.stack}>
-        <View style={styles.emergencyHero}>
-          <View style={styles.emergencyHeroIcon}>
-            <Siren size={theme.icon(42)} color={theme.colors.onBrand} strokeWidth={2} />
-          </View>
+        <Pop style={styles.emergencyHero}>
+          <BurstIcon>
+            <View style={styles.emergencyHeroIcon}>
+              <Siren size={theme.icon(42)} color={theme.colors.onBrand} strokeWidth={2} />
+            </View>
+          </BurstIcon>
           <Text style={styles.emergencyHeroTitle}>Stop. You have time.</Text>
           <Text style={styles.emergencyHeroText}>A real bank, agency, or family member can always wait. Take a slow breath.</Text>
-        </View>
+        </Pop>
 
         <Text style={styles.emergencySectionTitle}>Right now, do NOT</Text>
         <View style={styles.dontList}>
           {dontDo.map((item, index) => {
             const Icon = item.icon;
             return (
-              <View key={item.text} style={[styles.dontRow, index < dontDo.length - 1 && styles.dontRowDivider]}>
+              <Reveal key={item.text} delay={100 + index * 80} style={[styles.dontRow, index < dontDo.length - 1 && styles.dontRowDivider]}>
                 <View style={styles.dontIcon}>
                   <Icon size={theme.icon(24)} color={theme.colors.danger} strokeWidth={2} />
                 </View>
                 <Text style={styles.dontText}>{item.text}</Text>
-              </View>
+              </Reveal>
             );
           })}
         </View>
@@ -1130,7 +1132,8 @@ function MainApp() {
       <View style={styles.stack}>
         <Text style={styles.screenIntro}>Save up to two people you trust, so help is always one tap away.</Text>
         {contactDrafts.map((contact, index) => (
-          <Card key={contact.id}>
+          <Reveal key={contact.id} delay={index * 90}>
+          <Card>
             <Text style={styles.cardTitle}>{contact.label}</Text>
             <TextInput
               style={styles.input}
@@ -1153,13 +1156,16 @@ function MainApp() {
               <SecondaryAction icon={MessageCircle} label="Text" onPress={() => textContact(contact)} disabled={!contact.phone.trim()} />
             </View>
           </Card>
+          </Reveal>
         ))}
+        <Reveal delay={180}>
         <Card>
           <Text style={styles.cardTitle}>Family verification phrase</Text>
           <Text style={styles.cardBody}>Agree on a private phrase with your family. Ask for it during any emergency call to confirm it is really them.</Text>
           <TextInput style={styles.input} value={familyPhrase} onChangeText={setFamilyPhrase} placeholder="Example: blue porch light" placeholderTextColor={theme.colors.faint} />
           <Btn label="Save phrase" icon={ShieldCheck} onPress={savePhrase} />
         </Card>
+        </Reveal>
       </View>
     );
   }
@@ -1180,10 +1186,10 @@ function MainApp() {
         />
         {hasUrlInput ? <RiskPanel result={linkResult} /> : null}
         <SecondaryAction icon={X} label="Clear" onPress={() => setUrlText('')} disabled={!hasUrlInput} />
-        <TouchableOpacity style={[styles.secondaryButtonWide, !hasUrlInput && styles.disabledButton]} onPress={() => openUrl(urlText)} disabled={!hasUrlInput}>
+        <PressableScale style={[styles.secondaryButtonWide, !hasUrlInput && styles.disabledButton]} onPress={() => openUrl(urlText)} disabled={!hasUrlInput} accessibilityLabel="Open link only if you expected it">
           <ExternalLink size={theme.icon(20)} color={hasUrlInput ? theme.colors.brand : theme.colors.faint} />
           <Text style={[styles.secondaryButtonWideText, !hasUrlInput && styles.disabledText]}>Open only if you expected it</Text>
-        </TouchableOpacity>
+        </PressableScale>
       </View>
     );
   }
@@ -1215,10 +1221,10 @@ function MainApp() {
         />
         {hasQrInput ? <RiskPanel result={qrResult} /> : null}
         <SecondaryAction icon={X} label="Clear" onPress={() => setQrValue('')} disabled={!hasQrInput} />
-        <TouchableOpacity style={[styles.secondaryButtonWide, !hasQrInput && styles.disabledButton]} onPress={() => openUrl(qrValue)} disabled={!hasQrInput}>
+        <PressableScale style={[styles.secondaryButtonWide, !hasQrInput && styles.disabledButton]} onPress={() => openUrl(qrValue)} disabled={!hasQrInput} accessibilityLabel="Open only if verified">
           <ExternalLink size={theme.icon(20)} color={hasQrInput ? theme.colors.brand : theme.colors.faint} />
           <Text style={[styles.secondaryButtonWideText, !hasQrInput && styles.disabledText]}>Open only if verified</Text>
-        </TouchableOpacity>
+        </PressableScale>
       </View>
     );
   }
@@ -1269,20 +1275,22 @@ function MainApp() {
       <View style={styles.stack}>
         <View style={styles.sectionHeader}>
           <Text style={styles.screenIntroNarrow}>Current warnings from public safety sources.</Text>
-          <TouchableOpacity style={styles.refreshButton} onPress={refreshAlerts} accessibilityRole="button">
+          <PressableScale style={styles.refreshButton} onPress={refreshAlerts} pressedScale={0.94} accessibilityLabel="Refresh alerts">
             <Newspaper size={theme.icon(18)} color={theme.colors.brand} />
             <Text style={styles.refreshText}>Refresh</Text>
-          </TouchableOpacity>
+          </PressableScale>
         </View>
-        {alerts.map((alert) => (
-          <TouchableOpacity key={alert.id} style={styles.newsItem} onPress={() => Linking.openURL(alert.url)} activeOpacity={0.75}>
-            <View style={styles.newsTop}>
-              <Text style={styles.newsSource}>{alert.source}</Text>
-              <Text style={styles.newsDate}>{formatDate(alert.date)}</Text>
-            </View>
-            <Text style={styles.newsTitle}>{alert.title}</Text>
-            <Text style={styles.cardBody}>{alert.summary}</Text>
-          </TouchableOpacity>
+        {alerts.map((alert, i) => (
+          <Reveal key={alert.id} delay={i * 70}>
+            <PressableScale style={styles.newsItem} onPress={() => Linking.openURL(alert.url)} pressedScale={0.98} accessibilityLabel={alert.title}>
+              <View style={styles.newsTop}>
+                <Text style={styles.newsSource}>{alert.source}</Text>
+                <Text style={styles.newsDate}>{formatDate(alert.date)}</Text>
+              </View>
+              <Text style={styles.newsTitle}>{alert.title}</Text>
+              <Text style={styles.cardBody}>{alert.summary}</Text>
+            </PressableScale>
+          </Reveal>
         ))}
       </View>
     );
@@ -1296,25 +1304,28 @@ function MainApp() {
     const pct = modules.length ? Math.round((done / modules.length) * 100) : 0;
     return (
       <View style={styles.learnStack}>
-        <View style={styles.confidencePanel}>
-          <View style={styles.metricTopRow}>
-            <Text style={styles.metricLabel}>Your learning journey</Text>
-            <Text style={styles.metricSmall}>
-              {done} of {modules.length} done
-            </Text>
+        <Reveal>
+          <View style={styles.confidencePanel}>
+            <View style={styles.metricTopRow}>
+              <Text style={styles.metricLabel}>Your learning journey</Text>
+              <Text style={styles.metricSmall}>
+                {done} of {modules.length} done
+              </Text>
+            </View>
+            <Text style={styles.metricValue}>{pct}%</Text>
+            <ProgressBar value={pct === 0 ? 2 : pct} />
           </View>
-          <Text style={styles.metricValue}>{pct}%</Text>
-          <ProgressBar value={pct === 0 ? 2 : pct} />
-        </View>
+        </Reveal>
         <Text style={styles.screenIntro}>A new lesson opens each week. Tap one to read it and take the quiz.</Text>
-        {modules.map((module) => (
-          <WeekRow
-            key={module.id}
-            module={module}
-            createdAt={createdAt}
-            completed={progress.completedWeeks.includes(module.id)}
-            onOpen={() => openLesson(module.id)}
-          />
+        {modules.map((module, i) => (
+          <Reveal key={module.id} delay={Math.min(i, 6) * 55}>
+            <WeekRow
+              module={module}
+              createdAt={createdAt}
+              completed={progress.completedWeeks.includes(module.id)}
+              onOpen={() => openLesson(module.id)}
+            />
+          </Reveal>
         ))}
         <Btn label="Extra practice quiz" icon={Trophy} variant="secondary" onPress={() => navigate('practice')} />
       </View>
@@ -1352,12 +1363,12 @@ function MainApp() {
             const isCorrect = answered && practice.answer === option;
             const isWrong = answered && isSelected && practice.answer !== option;
             return (
-              <TouchableOpacity
+              <PressableScale
                 key={option}
                 style={[styles.answerButton, isSelected && styles.answerSelected, isCorrect && styles.answerCorrect, isWrong && styles.answerWrong]}
                 onPress={() => choosePractice(option)}
-                activeOpacity={0.78}
                 disabled={answered}
+                accessibilityLabel={option === 'safe' ? 'Safe' : option === 'suspicious' ? 'Not sure' : 'Scam'}
               >
                 {isCorrect ? (
                   <CheckCircle2 size={theme.icon(22)} color={theme.colors.low} />
@@ -1367,12 +1378,12 @@ function MainApp() {
                   <Circle size={theme.icon(22)} color={isSelected ? theme.colors.info : theme.colors.muted} />
                 )}
                 <Text style={styles.answerText}>{option === 'safe' ? 'Safe' : option === 'suspicious' ? 'Not sure' : 'Scam'}</Text>
-              </TouchableOpacity>
+              </PressableScale>
             );
           })}
         </View>
         {answered ? (
-          <View style={styles.feedbackPanel}>
+          <Pop style={styles.feedbackPanel}>
             <Text style={[styles.feedbackTitle, selectedPractice !== practice.answer && styles.feedbackWrong]}>
               {selectedPractice === practice.answer ? 'Correct' : `Answer: ${practice.answer === 'suspicious' ? 'not sure' : practice.answer}`}
             </Text>
@@ -1385,7 +1396,7 @@ function MainApp() {
             ))}
             <Btn label="Next example" icon={ChevronRight} onPress={nextPractice} />
             <SecondaryAction icon={X} label="Restart quiz" onPress={restartPractice} />
-          </View>
+          </Pop>
         ) : null}
       </View>
     );
@@ -1395,16 +1406,18 @@ function MainApp() {
     return (
       <View style={styles.stack}>
         <Text style={styles.screenIntro}>If anything was shared or paid, act quickly. Start here.</Text>
-        {recoverySteps.map((group) => (
-          <Card key={group.title}>
-            <Text style={styles.cardTitle}>{group.title}</Text>
-            {group.items.map((item) => (
-              <View key={item} style={styles.bulletRow}>
-                <CheckCircle2 size={theme.icon(19)} color={theme.colors.brand} />
-                <Text style={styles.bulletText}>{item}</Text>
-              </View>
-            ))}
-          </Card>
+        {recoverySteps.map((group, gi) => (
+          <Reveal key={group.title} delay={gi * 90}>
+            <Card>
+              <Text style={styles.cardTitle}>{group.title}</Text>
+              {group.items.map((item) => (
+                <View key={item} style={styles.bulletRow}>
+                  <CheckCircle2 size={theme.icon(19)} color={theme.colors.brand} />
+                  <Text style={styles.bulletText}>{item}</Text>
+                </View>
+              ))}
+            </Card>
+          </Reveal>
         ))}
         <Btn label="Report fraud to the FTC" icon={ExternalLink} onPress={() => Linking.openURL('https://reportfraud.ftc.gov/')} />
         <Btn label="Report internet fraud to IC3" icon={ExternalLink} variant="secondary" onPress={() => Linking.openURL('https://www.ic3.gov/')} />
@@ -1436,10 +1449,10 @@ function MainApp() {
         />
         <Btn label="Check this number" icon={ShieldCheck} onPress={runCallRiskCheck} disabled={!hasPhoneInput} />
         {callRisk ? <CallRiskPanel result={callRisk} /> : null}
-        <TouchableOpacity style={[styles.secondaryButtonWide, !hasPhoneInput && styles.disabledButton]} onPress={openSearchForPhone} disabled={!hasPhoneInput}>
+        <PressableScale style={[styles.secondaryButtonWide, !hasPhoneInput && styles.disabledButton]} onPress={openSearchForPhone} disabled={!hasPhoneInput} accessibilityLabel="Search community scam reports">
           <Search size={theme.icon(20)} color={hasPhoneInput ? theme.colors.brand : theme.colors.faint} />
           <Text style={[styles.secondaryButtonWideText, !hasPhoneInput && styles.disabledText]}>Search community scam reports</Text>
-        </TouchableOpacity>
+        </PressableScale>
       </View>
     );
   }
@@ -1605,8 +1618,11 @@ function MainApp() {
           style={[
             styles.screenTransition,
             {
-              opacity: screenAnim,
-              transform: [{ translateY: screenAnim.interpolate({ inputRange: [0, 1], outputRange: [18, 0] }) }],
+              opacity: screenAnim.interpolate({ inputRange: [0, 1], outputRange: [0, 1], extrapolate: 'clamp' }),
+              transform: [
+                { translateY: screenAnim.interpolate({ inputRange: [0, 1], outputRange: [22, 0] }) },
+                { scale: screenAnim.interpolate({ inputRange: [0, 1], outputRange: [0.985, 1] }) },
+              ],
             },
           ]}
         >
@@ -1741,11 +1757,10 @@ function ToolRow({ label, detail, icon: Icon, onPress, tone, last }: { label: st
   const styles = useMemo(() => makeStyles(theme), [theme]);
   const color = tone ? levelColor(theme, tone) : theme.colors.brand;
   return (
-    <TouchableOpacity
+    <PressableScale
       style={[styles.toolRow, !last && styles.toolRowDivider]}
       onPress={onPress}
-      activeOpacity={0.7}
-      accessibilityRole="button"
+      pressedScale={0.98}
       accessibilityLabel={`${label}. ${detail}`}
     >
       <View style={[styles.toolRowIcon, { backgroundColor: tone ? levelBg(theme, tone) : theme.colors.brandTint }]}>
@@ -1756,7 +1771,7 @@ function ToolRow({ label, detail, icon: Icon, onPress, tone, last }: { label: st
         <Text style={styles.toolRowDetail}>{detail}</Text>
       </View>
       <ChevronRight size={theme.icon(24)} color={theme.colors.faint} strokeWidth={2.4} />
-    </TouchableOpacity>
+    </PressableScale>
   );
 }
 
@@ -1776,7 +1791,7 @@ function SpamModelPanel({ review }: { review: HfSpamReview }) {
   const styles = useMemo(() => makeStyles(theme), [theme]);
   const color = levelColor(theme, review.level);
   return (
-    <View style={[styles.riskPanel, { backgroundColor: levelBg(theme, review.level), borderColor: color }]}>
+    <Pop style={[styles.riskPanel, { backgroundColor: levelBg(theme, review.level), borderColor: color }]}>
       <View style={styles.riskTop}>
         <View style={styles.riskTextColumn}>
           <Text style={[styles.riskLabel, { color }]}>SMS spam check</Text>
@@ -1801,7 +1816,7 @@ function SpamModelPanel({ review }: { review: HfSpamReview }) {
           <Text style={styles.bulletText}>{step}</Text>
         </View>
       ))}
-    </View>
+    </Pop>
   );
 }
 
@@ -1810,7 +1825,7 @@ function AiReviewPanel({ review }: { review: AiScamReview }) {
   const styles = useMemo(() => makeStyles(theme), [theme]);
   const color = levelColor(theme, review.level);
   return (
-    <View style={[styles.riskPanel, { backgroundColor: levelBg(theme, review.level), borderColor: color }]}>
+    <Pop style={[styles.riskPanel, { backgroundColor: levelBg(theme, review.level), borderColor: color }]}>
       <View style={styles.riskTop}>
         <View style={styles.riskTextColumn}>
           <Text style={[styles.riskLabel, { color }]}>AI review</Text>
@@ -1841,7 +1856,7 @@ function AiReviewPanel({ review }: { review: AiScamReview }) {
           <Text style={styles.bulletText}>{step}</Text>
         </View>
       ))}
-    </View>
+    </Pop>
   );
 }
 
@@ -1853,7 +1868,7 @@ function RiskPanel({ result }: { result: AnalysisResult }) {
   const visibleFindings = [...result.findings].sort((left, right) => right.points - left.points).slice(0, 3);
   const hiddenFindingCount = Math.max(0, result.findings.length - visibleFindings.length);
   return (
-    <View style={[styles.riskPanel, { backgroundColor: levelBg(theme, result.level), borderColor: color }]}>
+    <Pop style={[styles.riskPanel, { backgroundColor: levelBg(theme, result.level), borderColor: color }]}>
       <View style={styles.riskTop}>
         <View style={styles.riskTextColumn}>
           <Text style={[styles.riskLabel, { color }]}>{labelForLevel(result.level)}</Text>
@@ -1890,7 +1905,7 @@ function RiskPanel({ result }: { result: AnalysisResult }) {
           <Text style={styles.bulletText}>{step}</Text>
         </View>
       ))}
-    </View>
+    </Pop>
   );
 }
 
@@ -1899,7 +1914,7 @@ function CallRiskPanel({ result }: { result: CallRiskResult }) {
   const styles = useMemo(() => makeStyles(theme), [theme]);
   const color = levelColor(theme, result.level);
   return (
-    <View style={[styles.riskPanel, { backgroundColor: levelBg(theme, result.level), borderColor: color }]}>
+    <Pop style={[styles.riskPanel, { backgroundColor: levelBg(theme, result.level), borderColor: color }]}>
       <View style={styles.riskTop}>
         <View style={styles.riskTextColumn}>
           <Text style={[styles.riskLabel, { color }]}>{result.uncertain ? 'Possible risk' : 'Spoofing / scam check'}</Text>
@@ -1925,7 +1940,7 @@ function CallRiskPanel({ result }: { result: CallRiskResult }) {
         <Text style={styles.scriptLabel}>Recommendation</Text>
         <Text style={styles.scriptText}>{result.recommendation}</Text>
       </View>
-    </View>
+    </Pop>
   );
 }
 
@@ -1944,10 +1959,16 @@ function SecondaryAction({ icon: Icon, label, onPress, disabled }: { icon: Lucid
   const theme = useTheme();
   const styles = useMemo(() => makeStyles(theme), [theme]);
   return (
-    <TouchableOpacity style={[styles.secondaryAction, disabled && styles.disabledButton]} onPress={onPress} disabled={disabled} activeOpacity={0.75} accessibilityRole="button" accessibilityState={{ disabled: Boolean(disabled) }}>
+    <PressableScale
+      style={[styles.secondaryAction, disabled && styles.disabledButton]}
+      onPress={onPress}
+      disabled={disabled}
+      accessibilityLabel={label}
+      accessibilityState={{ disabled: Boolean(disabled) }}
+    >
       <Icon size={theme.icon(19)} color={disabled ? theme.colors.faint : theme.colors.brand} />
       <Text style={[styles.secondaryActionText, disabled && styles.disabledText]}>{label}</Text>
-    </TouchableOpacity>
+    </PressableScale>
   );
 }
 
@@ -1973,12 +1994,7 @@ function AttachmentLabel({ icon: Icon, label, onClear }: { icon: LucideIcon; lab
 function ProgressBar({ value }: { value: number }) {
   const theme = useTheme();
   const styles = useMemo(() => makeStyles(theme), [theme]);
-  const width = `${Math.max(4, Math.min(100, value))}%` as DimensionValue;
-  return (
-    <View style={styles.progressTrack}>
-      <View style={[styles.progressFill, { width }]} />
-    </View>
-  );
+  return <AnimatedBar value={Math.max(4, value)} trackStyle={styles.progressTrack} fillStyle={styles.progressFill} />;
 }
 
 function ActivityRow({ event, detailed }: { event: DetectionEvent; detailed?: boolean }) {
@@ -2051,12 +2067,12 @@ function TrustedContactStrip({
               <Text style={styles.contactName}>{contact.name || contact.label}</Text>
               <Text style={styles.smallMuted}>{contact.phone}</Text>
             </View>
-            <TouchableOpacity style={styles.iconButton} onPress={() => onCall(contact)} accessibilityLabel={`Call ${contact.name || contact.label}`}>
+            <PressableScale style={styles.iconButton} onPress={() => onCall(contact)} pressedScale={0.9} accessibilityLabel={`Call ${contact.name || contact.label}`}>
               <Phone size={theme.icon(21)} color={theme.colors.brand} />
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.iconButton} onPress={() => onText(contact)} accessibilityLabel={`Text ${contact.name || contact.label}`}>
+            </PressableScale>
+            <PressableScale style={styles.iconButton} onPress={() => onText(contact)} pressedScale={0.9} accessibilityLabel={`Text ${contact.name || contact.label}`}>
               <MessageCircle size={theme.icon(21)} color={theme.colors.brand} />
-            </TouchableOpacity>
+            </PressableScale>
           </View>
         ))
       ) : (
@@ -2083,12 +2099,11 @@ function WeekRow({
   const days = daysUntilUnlock(createdAt, module.week);
 
   return (
-    <TouchableOpacity
+    <PressableScale
       style={[styles.weekRow, !unlocked && styles.weekRowLocked]}
       onPress={onOpen}
       disabled={!unlocked}
-      activeOpacity={0.8}
-      accessibilityRole="button"
+      pressedScale={0.98}
       accessibilityLabel={`Week ${module.week}. ${module.title}. ${unlocked ? '' : `Unlocks in ${days} days.`}`}
     >
       <View
@@ -2114,7 +2129,7 @@ function WeekRow({
         {!unlocked ? <Text style={styles.weekLocked}>Opens in {days} day{days === 1 ? '' : 's'}</Text> : null}
       </View>
       {unlocked ? <ChevronRight size={theme.icon(24)} color={theme.colors.faint} strokeWidth={2.4} /> : null}
-    </TouchableOpacity>
+    </PressableScale>
   );
 }
 
@@ -2277,12 +2292,7 @@ function LessonScreen({ module, onBack }: { module: WeeklyModule; onBack: () => 
 function ProgressBarTinted({ value }: { value: number }) {
   const theme = useTheme();
   const styles = useMemo(() => makeStyles(theme), [theme]);
-  const width = `${Math.max(4, Math.min(100, value))}%` as DimensionValue;
-  return (
-    <View style={styles.quizTrack}>
-      <View style={[styles.quizFill, { width }]} />
-    </View>
-  );
+  return <AnimatedBar value={Math.max(4, value)} trackStyle={styles.quizTrack} fillStyle={styles.quizFill} />;
 }
 
 // First-run feature walkthrough shown once after onboarding.
@@ -2668,6 +2678,22 @@ function GameHeader({ title, onBack }: { title: string; onBack: () => void }) {
   );
 }
 
+// Celebratory spring-in (scale + slight rotate) for result/win icons.
+function BurstIcon({ children }: { children: React.ReactNode }) {
+  const theme = useTheme();
+  const v = useRef(new Animated.Value(theme.reducedMotion ? 1 : 0)).current;
+  useEffect(() => {
+    if (theme.reducedMotion) {
+      v.setValue(1);
+      return;
+    }
+    Animated.sequence([Animated.delay(120), Animated.spring(v, { toValue: 1, useNativeDriver: true, speed: 6, bounciness: 16 })]).start();
+  }, [v, theme.reducedMotion]);
+  const scale = v.interpolate({ inputRange: [0, 1], outputRange: [0.3, 1] });
+  const rotate = v.interpolate({ inputRange: [0, 1], outputRange: ['-22deg', '0deg'] });
+  return <Animated.View style={{ transform: [{ scale }, { rotate }] }}>{children}</Animated.View>;
+}
+
 function GameResult({ score, total, onReplay, onBack }: { score: number; total: number; onReplay: () => void; onBack: () => void }) {
   const theme = useTheme();
   const styles = useMemo(() => makeStyles(theme), [theme]);
@@ -2675,14 +2701,16 @@ function GameResult({ score, total, onReplay, onBack }: { score: number; total: 
   const great = pct >= 70;
   return (
     <View style={{ gap: theme.space.lg }}>
-      <View style={styles.resultBox}>
-        <View style={[styles.resultIcon, { backgroundColor: great ? theme.colors.lowTint : theme.colors.warnTint }]}>
-          {great ? <Trophy size={theme.icon(44)} color={theme.colors.low} strokeWidth={2.2} /> : <Flame size={theme.icon(44)} color={theme.colors.warn} strokeWidth={2.2} />}
-        </View>
+      <Pop style={styles.resultBox}>
+        <BurstIcon>
+          <View style={[styles.resultIcon, { backgroundColor: great ? theme.colors.lowTint : theme.colors.warnTint }]}>
+            {great ? <Trophy size={theme.icon(44)} color={theme.colors.low} strokeWidth={2.2} /> : <Flame size={theme.icon(44)} color={theme.colors.warn} strokeWidth={2.2} />}
+          </View>
+        </BurstIcon>
         <Text style={styles.resultScore}>{score} / {total}</Text>
         <Text style={styles.resultTitle}>{great ? 'Great job!' : 'Nice effort!'}</Text>
         <Text style={styles.resultText}>You earned this week’s streak. Come back next week to keep it growing.</Text>
-      </View>
+      </Pop>
       <Btn label="Play again" icon={Shuffle} onPress={onReplay} />
       <Btn label="All games" variant="secondary" icon={ChevronLeft} onPress={onBack} />
     </View>
@@ -3122,12 +3150,11 @@ function MemoryGame({ onBack, onWin }: { onBack: () => void; onWin: () => void }
           const show = flipped.includes(card.id) || matched.includes(card.term);
           const done = matched.includes(card.term);
           return (
-            <TouchableOpacity
+            <PressableScale
               key={card.id}
               style={[styles.memCard, show && styles.memCardUp, done && styles.memCardDone]}
               onPress={() => tap(card)}
-              activeOpacity={0.85}
-              accessibilityRole="button"
+              pressedScale={0.92}
               accessibilityLabel={show ? card.term : 'hidden card'}
             >
               {show ? (
@@ -3135,7 +3162,7 @@ function MemoryGame({ onBack, onWin }: { onBack: () => void; onWin: () => void }
               ) : (
                 <ShieldCheck size={theme.icon(28)} color={theme.colors.faint} strokeWidth={2} />
               )}
-            </TouchableOpacity>
+            </PressableScale>
           );
         })}
       </View>
