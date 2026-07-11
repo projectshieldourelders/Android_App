@@ -29,6 +29,19 @@ npm run test:scams
 npx expo start
 ```
 
+## Platform Folders
+
+The shared app code lives at the repo root in `App.tsx` and `src/`.
+
+- `android/` contains the native Android project.
+- `ios/` contains the native Apple/iOS Xcode project.
+
+When app configuration changes, regenerate both native folders with:
+
+```bash
+npx expo prebuild --platform all
+```
+
 For Android emulator testing, open the Expo URL in Expo Go or run the app through Android Studio/Expo tooling.
 
 For iOS simulator testing, install Xcode, accept the Xcode license, then run:
